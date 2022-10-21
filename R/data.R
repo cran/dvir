@@ -78,7 +78,7 @@
 #' DVI dataset: A large reference pedigree
 #'
 #' DVI dataset based loosely on the ICMP workshop material
-#' http://www.few.vu.nl/~ksn560/Block-III-PartI-KS-ISFG2017.pdf (page 18). There
+#' https://www.few.vu.nl/~ksn560/Block-III-PartI-KS-ISFG2017.pdf (page 18). There
 #' are 3 female victims, 2 male victims and 6 missing persons of both sexes. We
 #' have renamed the individuals and simulated data for 13 CODIS markers (see
 #' Details).
@@ -248,3 +248,63 @@
 #' 
 "dataExample481"
 
+#' Data. Simulated sib pairs
+#'
+#' The purpose of this data is to challenge brute force methods. We use the
+#' the database NorwegianFrequencies.
+#' There are 10 males (V1, V3, ..., V19) and 10 female victims (V2, V4, ..., V20).
+#' There are 10 reference families. In each family there is a genotyped grandmother
+#' and a missing grandson and a missing granddaughter. The data is simulated according to
+#' Vi = Mi, i = 1, ..., 20. 
+#' 
+#' @format A list of 3 elements:
+#'
+#'   * `pm`: A list of 20 singletons (victims).
+#'
+#'   * `am`: A list of 10 pedigrees. 
+#'
+#'   * `missing`: A vector containing the names of the 20 missing persons.
+#'   
+#' @examples
+#' 
+#' \donttest{
+#' # Remove comments to run example
+#' # Number of possible assignments
+#' ncomb(10, 10, 10, 10) 
+#' 
+#' pm = sibPairs$pm
+#' am = sibPairs$am
+#' missing = sibPairs$missing
+#' sequentialDVI(pm, am, missing, updateLR = TRUE)
+#' # jointDVI(pm, am, missing, threshold = 100)
+#' 
+#' # Reduce to 15 markers. `sequentialDVI` still gives correct solutions,
+#' # but `jointDVI` struggles. Recommend sequential approach or possible to modify the joint?
+#' set1 = c("CSF1PO", "D2S1338", "D3S1358", "D5S818", "D7S820", "D8S1179", "D13S317", "D16S539",
+#'        "D18S51", "D19S433", "D21S11", "FGA", "TH01", "TPOX", "VWA")
+#' 
+#' # jointDVI(pm, am, missing, markers = set1, threshold = 10)
+#' }
+"sibPairs"
+
+
+#' Data. exclusionExample
+#'
+#' This data is based on a real case, but pedigrees have been changed and
+#' marker data simulated to preserve anonymity.
+#' 
+#' @format A list of 3 elements:
+#'
+#'   * `pm`: A list of 16 singletons (male victims).
+#'
+#'   * `am`: A list of 15 pedigrees, each with one missing person 
+#'
+#'   * `missing`: A vector containing the names of the 15 missing persons.
+#'   
+#' @examples
+#' 
+#' pm = exclusionExample$pm
+#' am = exclusionExample$am
+#' missing = exclusionExample$missing
+#' summariseDVI(pm, am , missing)
+"exclusionExample"
