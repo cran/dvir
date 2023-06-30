@@ -3,9 +3,7 @@
 #' Generate a list of sex-consistent pairings for each victim in a DVI problem.
 #' By default, the empty pairing (denoted `*`) is included for each victim.
 #'
-#' @param pm A list of singletons.
-#' @param am A list of pedigrees.
-#' @param missing Character vector with names of missing persons.
+#' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param includeEmpty A logical. If TRUE (default), the do-nothing symbol (`*`)
 #'   is included for each victim.
 #' @param ignoreSex A logical.
@@ -19,17 +17,26 @@
 #'
 #' pm = list(singleton("V1", sex = 1),
 #'           singleton("V2", sex = 2))
-#'
+#'           
 #' missing = paste0("M", 1:4)
 #' am = list(nuclearPed(children = missing[1:3]),
 #'           nuclearPed(children = missing[4], sex = 2))
-#' generatePairings(pm, am, missing)
+#' 
+#' dvi = dviData(pm, am, missing)
+#' generatePairings(dvi)
 #'
 #' @export
-generatePairings = function(pm, am, missing, includeEmpty = TRUE, ignoreSex = FALSE){
+generatePairings = function(dvi, includeEmpty = TRUE, ignoreSex = FALSE){
+  
+  # Ensure proper dviData object
+  dvi = consolidateDVI(dvi)
+  
+  pm = dvi$pm
+  am = dvi$am
+  missing = dvi$missing
   
   # ID of victims
-  vics = unlist(labels(pm), use.names = FALSE)
+  vics = names(pm)
   
   if(ignoreSex) {
     mp = if(includeEmpty) c("*", missing) else missing

@@ -4,18 +4,19 @@
 #' ratios \eqn{LR_{i,j}} comparing \eqn{V_i = M_j} to the null. The output may
 #' be reduced by specifying arguments `limit` or `nkeep`.
 #'
-#' @param pm A list of singletons, the victims.
-#' @param am A list of pedigrees. The reference families.
-#' @param missing A character vector with names of missing persons.
+#' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param pairings A list of possible pairings for each victim. If NULL, all
 #'   sex-consistent pairings are used.
 #' @param ignoreSex A logical.
-#' @param limit A nonnegative number controlling the `pairing` slot of the
+#' @param limit A nonnegative number controlling the `pairings` slot of the
 #'   output: Only pairings with LR greater or equal to `limit` are kept. If zero
 #'   (default), pairings with LR > 0 are kept.
-#' @param nkeep An integer. No of pairings to keep, all if `NULL`.
+#' @param nkeep An integer, or NULL. If given, only the `nkeep` most likely
+#'   pairings are kept for each victim.
 #' @param check A logical, indicating if the input data should be checked for
 #'   consistency.
+#' @param numCores An integer; the number of cores used in parallelisation.
+#'   Default: 1.
 #' @param verbose A logical.
 #'
 #' @return A list with 3 elements:
@@ -29,82 +30,70 @@
 #'   entries with corresponding LR >= `limit`. For the default case `limit = 0`
 #'   a strict inequality is used, i.e., LR > 0.
 #'
-#'
 #' @examples
-#'
-#' pm = example1$pm
-#' am = example1$am
-#' missing = example1$missing
-#'
-#' pairwiseLR(pm, am, missing)
+#' pairwiseLR(example1, verbose = TRUE)
 #'
 #' @export
-pairwiseLR = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep = NULL, 
-                    check = TRUE, verbose = FALSE){
-  if(length(pm) == 0)
-    return(list(LRmatrix = NULL, LRlist = list(), pairings = list()))
+pairwiseLR = function(dvi, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep = NULL, 
+                    check = TRUE, numCores = 1, verbose = FALSE){
   
-  if(is.singleton(pm)) pm = list(pm)
-  if(is.ped(am)) am = list(am)
+  if(verbose)
+    message("Computing matrix of pairwise LR")
   
-  if(is.null(pairings)) # Generate pairings
-    pairings = generatePairings(pm, am, missing = missing, ignoreSex = ignoreSex)
+  # Ensure proper dviData object
+  dvi = consolidateDVI(dvi)
   
   # Check consistency
   if(check)
-    checkDVI(pm, am, missing = missing, pairings = pairings, ignoreSex = ignoreSex)
-
-  # Ensure correct names
-  vics = names(pm) = unlist(labels(pm), use.names = FALSE)
+    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex)
   
+  pm = dvi$pm
+  am = dvi$am
+  missing = dvi$missing
+  
+  if(length(pm) == 0)
+    return(list(LRmatrix = NULL, LRlist = list(), pairings = list()))
+  
+  # Generate pairings
+  pairings = pairings %||% dvi$pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
+  
+  # Loglik of each victim and each ref
   marks = 1:nMarkers(pm)
-  
-  # Loglik of each victim
   logliks.PM = vapply(pm, loglikTotal, markers = marks, FUN.VALUE = 1)
-  
-  # Loglik of each ref family
   logliks.AM = vapply(am, loglikTotal, markers = marks, FUN.VALUE = 1)
   
   # log-likelihood of H0
   loglik0 = sum(logliks.PM) + sum(logliks.AM)
   
   if(loglik0 == -Inf)
-    stop("Impossible initial data: AM component ", toString(which(logliks.AM == -Inf)))
+    stop2("Impossible initial data: AM component ", which(logliks.AM == -Inf))
   
   # For each victim, compute the LR of each pairing
-  LRlist = lapply(vics, function(v) {
+  vics = names(pm)
+  
+  # Dont use more cores than the number of vics
+  numCores = min(numCores, length(vics))
+  
+  # Parallelise
+  if(numCores > 1) {
     
-    # Corresponding vector of LRs
-    lrs = vapply(pairings[[v]], function(mp) {
-      
-      if(mp == "*") 
-        return(1)
-      
-      # Make copy of AM likelihoods (vector)
-      logliks.AM.new = logliks.AM
-      
-      # The relevant AM component 
-      compNo = getComponent(am, mp, checkUnique = TRUE)
-      
-      # Move victim data to `mp`
-      comp = transferMarkers(pm[[v]], am[[compNo]], idsFrom = v, idsTo = mp, erase = FALSE)
-      
-      # Update likelihood of this comp
-      logliks.AM.new[compNo] = loglikTotal(comp, marks)
-      
-      # Likelihood of remaining PMs
-      logliks.PM.new = logliks.PM[setdiff(vics, v)]
-      
-      # Total loglik after move
-      loglik.move = sum(logliks.PM.new) + sum(logliks.AM.new)
-      
-      # Return LR
-      exp(loglik.move - loglik0)
-    }, FUN.VALUE = numeric(1))
+    if(verbose) 
+      message("Using ", numCores, " cores")
     
-    # Return sorted vector
-    sort(lrs, decreasing = TRUE)
-  })
+    cl = makeCluster(numCores)
+    on.exit(stopCluster(cl))
+    clusterEvalQ(cl, library(dvir))
+    clusterExport(cl, "pairwise_singlevic", envir = environment())
+    
+    # Loop through victims
+    LRlist = parLapply(cl, vics, function(v) 
+      pairwise_singlevic(am, vics, v, pm[[v]], pairings[[v]], marks, loglik0, logliks.PM, logliks.AM))
+  }
+  else {
+    # Default: no parallelisation
+    LRlist = lapply(vics, function(v) 
+      pairwise_singlevic(am, vics, v, pm[[v]], pairings[[v]], marks, loglik0, logliks.PM, logliks.AM))
+  }
   
   names(LRlist) = vics
   
@@ -121,12 +110,60 @@ pairwiseLR = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, limit
   
   # Reduce pairings according to `limit` and/or nkeep
   pairings.reduced = lapply(LRlist, function(lrs) {
-    newpairings = names(lrs)[lrs > 0 & lrs >= limit]
-    if(!is.null(nkeep) && length(newpairings) > nkeep)
+    if(limit == 0) 
+      keepIdx = lrs > 0
+    else
+      keepIdx = lrs >= limit
+    if(limit > 1) 
+      keepIdx = keepIdx | names(lrs) == "*"  # Never remove "*"
+    
+    newpairings = names(lrs)[keepIdx]
+    
+    # Apply `nkeep` if given
+    if(!is.null(nkeep) && length(newpairings) > nkeep) {
+      starIdx = match("*", newpairings, nomatch = 0)
       length(newpairings) = nkeep
+      if(starIdx > nkeep)
+        newpairings = c(newpairings, "*")
+    }
+    
     newpairings
   })
   
   list(LRmatrix = LRmatrix, LRlist = LRlist, pairings = pairings.reduced)
 }
 
+
+# Function for computing the pairwise LRs for a single victim
+pairwise_singlevic = function(am, vics, v, pmV, pairingsV, marks, loglik0, logliks.PM, logliks.AM) {
+  
+  lrs = vapply(pairingsV, function(mp) {
+    
+    if(mp == "*") 
+      return(1)
+    
+    # Make copy of AM likelihoods (vector)
+    logliks.AM.new = logliks.AM
+    
+    # The relevant AM component 
+    compNo = getComponent(am, mp, checkUnique = TRUE)
+    
+    # Move victim data to `mp`
+    comp = transferMarkers(pmV, am[[compNo]], idsFrom = v, idsTo = mp, erase = FALSE)
+    
+    # Update likelihood of this comp
+    logliks.AM.new[compNo] = loglikTotal(comp, marks)
+    
+    # Likelihood of remaining PMs
+    logliks.PM.new = logliks.PM[setdiff(vics, v)]
+    
+    # Total loglik after move
+    loglik.move = sum(logliks.PM.new) + sum(logliks.AM.new)
+    
+    # Return LR
+    exp(loglik.move - loglik0)
+  }, FUN.VALUE = numeric(1))
+  
+  # Return sorted vector
+  sort(lrs, decreasing = TRUE)
+}

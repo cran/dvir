@@ -5,9 +5,7 @@
 \title{Sequential DVI search}
 \usage{
 sequentialDVI(
-  pm,
-  am,
-  missing,
+  dvi,
   updateLR = TRUE,
   threshold = 1,
   check = TRUE,
@@ -16,11 +14,7 @@ sequentialDVI(
 )
 }
 \arguments{
-\item{pm}{PM data: List of singletons.}
-
-\item{am}{AM data: A ped object or list of such.}
-
-\item{missing}{Character vector with names of the missing persons.}
+\item{dvi}{A \code{dviData} object, typically created with \code{\link[=dviData]{dviData()}}.}
 
 \item{updateLR}{A logical. If TRUE, the LR matrix is updated in each
 iteration.}
@@ -33,24 +27,43 @@ consistency.}
 
 \item{verbose}{A logical.}
 
-\item{debug}{A logical. If TRUE, the LR matrix is printed}
+\item{debug}{A logical. If TRUE, the LR matrix is printed.}
 }
 \value{
-A solution to the DVI problem in the form of an assignment vector.
+A list with two elements:
+\itemize{
+\item \code{matches}: A single assignment vector, or (if multiple branches)
+a data frame where each row is an assignment vector.
+\item \code{details}: A data frame (or a list of data frames, if multiple branches)
+including the LR of each identification in the order they were made.
+}
 }
 \description{
-Sequential DVI search
+Performs a sequential matching procedure based on the pairwise LR matrix. In
+each step the pairing corresponding to the highest LR is selected and
+included as a match if the LR exceeds the given threshold. By default,
+(\code{updateLR = TRUE}) the pairwise LRs are recomputed in each step after
+including the data from the identified sample.
+}
+\details{
+If, at any point, the highest LR is obtained by more than one pairing, the
+process branches off and produces multiple solutions. (See Value.)
 }
 \examples{
-pm = example1$pm
-am = example1$am
-missing = example1$missing
+# Without LR updates
+sequentialDVI(example1, updateLR = FALSE)
 
-sequentialDVI(pm, am, missing, updateLR = FALSE)
-sequentialDVI(pm, am, missing, updateLR = TRUE)
+# With LR updates (default). Note two branches!
+r = sequentialDVI(example1)
+
+# Plot the two solutions
+plotSolution(example1, r$matches, k = 1)
+plotSolution(example1, r$matches, k = 2)
+
+# Add `debug = T` to see the LR matrix in each step
+sequentialDVI(example1, debug = TRUE)
 
 # The output of can be fed into `jointDVI()`:
-res = sequentialDVI(pm, am, missing, updateLR = TRUE)
-jointDVI(pm, am, missing, assignments = res)
+jointDVI(example1, assignments = r$matches)
 
 }

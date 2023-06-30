@@ -1,4 +1,4 @@
-#' Undisputed identifications in DVI problems
+#' Undisputed identifications in a DVI problem
 #'
 #' This function uses the pairwise LR matrix to find "undisputed" matches
 #' between victims and missing individuals. An identification \eqn{V_i = M_j} is
@@ -10,9 +10,7 @@
 #' requiring instead that \eqn{LR_{i,j}} is at least `threshold` times greater
 #' than all other pairwise LRs involving \eqn{V_i} or \eqn{M_j}
 #'
-#' @param pm PM data: List of singletons.
-#' @param am AM data: A `ped` object or list of such.
-#' @param missing Character vector with names of the missing persons.
+#' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param pairings A list of possible pairings for each victim. If NULL, all
 #'   sex-consistent pairings are used.
 #' @param ignoreSex A logical.
@@ -22,67 +20,73 @@
 #'   Details). Default: FALSE.
 #' @param limit A positive number. Only pairwise LR values above this are
 #'   considered.
+#' @param nkeep An integer, or NULL. If given, only the `nkeep` most likely
+#'   pairings are kept for each victim.
 #' @param check A logical indicating if the input data should be checked for
 #'   consistency. Default: TRUE.
+#' @param numCores An integer; the number of cores used in parallelisation.
+#'   Default: 1.
 #' @param verbose A logical. Default: TRUE.
 #'
-#' @seealso [pairwiseLR()]
+#' @seealso [pairwiseLR()], [findExcluded()]
 #'
 #' @return A list with the following entries:
 #'
-#'   * `undisputed`: A list of undisputed matches and the corresponding LR
-#'   values.
+#'   * `undisputed`: A data frame containing the undisputed matches, including LR.
 #'
-#'   * `pmReduced`: Same as `pm`, but with the undisputed victims removed.
-#'
-#'   * `amReduced`: Same as `am`, but with the data from undisputed victims
-#'   inserted for the corresponding missing persons.
-#'
-#'   * `missingReduced`: Same as `missing`, but without the undisputed
-#'   identified missing persons.
+#'   * `dviReduced`: A reduced version of `dvi`, where undisputed
+#'   victims/missing persons are removed, and data from undisputed victims
+#'   inserted in `am`.
 #'
 #'   * `LRmatrix`, `LRlist`, `pairings`: Output from `pairwiseLR()` applied to
 #'   the reduced problem.
 #'
 #' @examples
-#' 
-#' \donttest{
-#' pm = planecrash$pm
-#' am = planecrash$am
-#' missing = planecrash$missing
 #'
-#' findUndisputed(pm, am, missing, threshold = 1e4)
+#' \donttest{
+#' findUndisputed(planecrash, threshold = 1e4)
 #'
 #' # With `relax = TRUE`, one more identification is undisputed
-#' findUndisputed(pm, am, missing, threshold = 1e4, relax = TRUE)
+#' findUndisputed(planecrash, threshold = 1e4, relax = TRUE)
 #' }
-#' 
+#'
 #' @export
-findUndisputed = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, threshold = 10000, relax = FALSE, 
-                          limit = 0, check = TRUE, verbose = TRUE) {
+findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 10000, 
+                          relax = FALSE, limit = 0, nkeep = NULL, check = TRUE, 
+                          numCores = 1, verbose = TRUE) {
   
-  if(is.singleton(pm))
-    pm = list(pm)
+  if(verbose) {
+    message("\nFinding undisputed matches")
+    message("Pairwise LR threshold = ", threshold)
+  }
+
+  # Ensure proper dviData object
+  dvi = consolidateDVI(dvi)
   
-  # Victim labels
-  vics = unlist(labels(pm))
-  names(pm) = vics  # ensure pm is named
+  # AM components (for use in output)
+  comp = getFamily(dvi, dvi$missing)
+  
+  # Initialise pairings if not given
+  dvi$pairings = pairings %||% dvi$pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
   
   # Initialise output
   RES = list()
   
-  it = 0
-  
-  # Pairwise LR matrix
-  ss = pairwiseLR(pm, am, missing, pairings = pairings, ignoreSex = ignoreSex, check = check, limit = limit)
-  B = ss$LRmatrix
-  
   # Loop until problem solved - or no more undisputed matches
-  while(length(missing) > 0 && length(vics) > 0 && any(B <= threshold)) {
+  stp = 0
+  while(TRUE) {
     
     if(verbose)
-      message("\nIteration ", it <- it+1, ":")
-      
+      message("\nStep ", stp <- stp+1, ":")
+    
+    vics = names(dvi$pm)
+    missing = dvi$missing
+    
+    # Pairwise LR matrix
+    ss = pairwiseLR(dvi, check = check, limit = limit, nkeep = nkeep, 
+                    numCores = numCores, verbose = verbose)
+    B = ss$LRmatrix
+    
     # Indices of matches exceeding threshold
     highIdx = which(B > threshold, arr.ind = TRUE)
     
@@ -98,19 +102,25 @@ findUndisputed = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, t
         all(c(B[rw, -cl], B[-rw, cl]) <= B[rw, cl]/threshold)
       })
     }
-      
-    if(!any(isUndisp)) {
-      if(verbose) message("No undisputed matches")
+     
+    Nundisp = if(!length(isUndisp)) 0 else sum(isUndisp)
+    
+    if(!Nundisp) {
+      if(verbose)
+        message(sprintf("No%s undisputed matches", if(stp > 1) " further" else ""))
       break
     }
     
+    if(verbose)
+      message(sprintf("%d undisputed %s", Nundisp, if(Nundisp == 1) "match" else "matches"))
+    
     undisp = highIdx[isUndisp, , drop = FALSE]
     
-    for(i in seq_len(nrow(undisp))) {
+    for(i in seq_len(Nundisp)) {
       rw = undisp[i,1]
       cl = undisp[i,2]
       vic = vics[rw] 
-      RES[[vic]] = list(match = missing[cl], LR = B[rw,cl])
+      RES[[vic]] = list(Step = stp, Missing = missing[cl], LR = B[rw,cl])
       
       if(verbose)
         message(sprintf(" %s = %s (LR = %.3g)", vic, missing[cl], B[rw,cl]))
@@ -119,25 +129,35 @@ findUndisputed = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, t
     undispVics = vics[undisp[, 1]]
     undispMP = missing[undisp[, 2]]
     
-    ### Update the LR matrix
+    # Data from identified samples (keep for updating dviRed below)
+    undispData = dvi$pm[undispVics]
+    
+    # Reduced DVI dataset
+    newvics = setdiff(vics, undispVics)
+    newmissing = setdiff(missing, undispMP)
+    dvi = subsetDVI(dvi, pm = newvics, missing = newmissing, verbose = verbose)
     
     # Move vic data to AM data
-    am = transferMarkers(from = pm, to = am, idsFrom = undispVics, idsTo = undispMP, erase = FALSE)
+    names(undispVics) = undispMP
+    relevantMP = intersect(undispMP, unlist(labels(dvi$am)))
+    if(length(relevantMP))
+      dvi$am = transferMarkers(from = undispData, to = dvi$am, 
+                               idsFrom = undispVics[relevantMP], 
+                               idsTo = relevantMP, erase = FALSE)
     
-    # Remove identified names from vectors
-    missing = setdiff(missing, undispMP)
-    vics = setdiff(vics, undispVics)
-    
-    # Remove vic from pm
-    pm = pm[vics]
-    
-    # Update `pairings`, if given
-    if(!is.null(pairings))
-      pairings = lapply(pairings[vics], function(v) setdiff(v, undispMP))
-    
-    ss = pairwiseLR(pm, am, missing, pairings = pairings, ignoreSex = ignoreSex, check = FALSE, limit = limit)
-    B = ss$LRmatrix
+    # Break?
+    if(!length(newmissing) || !length(newvics))
+      break
   }
   
-  c(list(undisputed = RES, pmReduced = pm, amReduced = am, missingReduced = missing), ss)
+  undispDF = do.call(rbind.data.frame, RES)
+  if(nrow(undispDF)) {
+    undispDF = cbind(undispDF, Sample = names(RES), Family = comp[undispDF$Missing])
+    undispDF = undispDF[c("Sample", "Missing", "Family", "LR", "Step")]
+    rownames(undispDF) = NULL
+  }
+  
+  # Disputed: TODO!
+  
+  c(list(undisputed = undispDF, dviReduced = dvi), ss)
 }

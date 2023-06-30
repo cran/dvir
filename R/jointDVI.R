@@ -4,9 +4,7 @@
 #' pedigrees. All possible assignments are evaluated and solutions ranked
 #' according to the likelihood.
 #'
-#' @param pm A list of singletons.
-#' @param am A list of pedigrees.
-#' @param missing Character vector with names of missing persons.
+#' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param pairings A list of possible pairings for each victim. If NULL, all
 #'   sex-consistent pairings are used.
 #' @param ignoreSex A logical.
@@ -15,66 +13,76 @@
 #'   taking all combinations from `pairings`.
 #' @param limit A positive number, by default 0. Only pairwise LR values above
 #'   this are considered.
+#' @param nkeep An integer, or NULL. If given, only the `nkeep` most likely
+#'   pairings are considered for each victim.
 #' @param markers A vector indicating which markers should be included in the
 #'   analysis. By default all markers are included.
 #' @param disableMutations A logical, or NA (default). The default action is to
 #'   disable mutations in all reference families without Mendelian errors.
 #' @param undisputed A logical, by default TRUE.
+#' @param maxAssign A positive integer. If the number of assignments going into
+#'   the joint calculation exceeds this, the function will abort with an
+#'   informative error message. Default: 1e5.
 #' @param threshold A positive number, passed onto [findUndisputed()]. Default:
 #'   1e4.
 #' @param relax A logical, passed onto [findUndisputed()]. Default: FALSE.
-#' @param numCores Integer. The number of cores used in parallelisation.
+#' @param numCores An integer; the number of cores used in parallelisation.
 #'   Default: 1.
 #' @param check A logical, indicating if the input data should be checked for
 #'   consistency.
 #' @param verbose A logical.
+#' @param jointRes A data frame produced by `jointDVI()`.
+#' @param LRthresh A positive number, used as upper limit for the LR comparing the
+#'   top result with all others.
 #'
 #' @return A data frame. Each row describes an assignment of victims to missing
 #'   persons, accompanied with its log likelihood, the LR compared to the null
 #'   (i.e., no identifications), and the posterior corresponding to a flat
 #'   prior.
 #'
+#'   The function `compactJointRes()` removes columns without assignments, and
+#'   solutions whose LR compared with the top result is below `1/LRthresh`. 
+#'   
 #' @seealso [pairwiseLR()], [findUndisputed()]
 #'
 #' @examples
-#' pm = example2$pm
-#' am = example2$am
-#' missing = example2$missing
+#' jointDVI(example2)
 #'
-#' jointDVI(pm, am, missing)
-#'
+#' @importFrom utils setTxtProgressBar txtProgressBar
 #' @importFrom parallel makeCluster stopCluster detectCores parLapply
 #'   clusterEvalQ clusterExport
 #'
 #' @export
-jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignments = NULL, limit = 0, undisputed = TRUE, markers = NULL,
-                    threshold = 1e4, relax = FALSE, disableMutations = NA, numCores = 1, check = TRUE, verbose = TRUE) {
+jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL, 
+                    limit = 0, nkeep = NULL, undisputed = TRUE, markers = NULL, 
+                    threshold = 1e4, relax = FALSE, disableMutations = NA, 
+                    maxAssign = 1e5, numCores = 1, check = TRUE, verbose = TRUE) {
   
   st = Sys.time()
   
-  if(length(pm) == 0)
+  # Ensure proper dviData object
+  dvi = consolidateDVI(dvi)
+  
+  if(length(dvi$pm) == 0)
     undisputed = FALSE
   
-  if(is.singleton(pm)) 
-    pm = list(pm)
-  if(is.ped(am)) 
-    am = list(am)
-  
-  names(pm) = origVics = vics = unlist(labels(pm)) 
+  origVics = vics = names(dvi$pm)
   
   if(!is.null(markers)) {
-    pm = selectMarkers(pm, markers)
-    am = selectMarkers(am, markers)
+    stop2("Marker selection not implemented")
+    # pm = selectMarkers(pm, markers)
+    # am = selectMarkers(am, markers)
   }
   
   if(verbose)
-    summariseDVI(pm, am, missing, method = "Joint identification", printMax = 10)
+    print.dviData(dvi)
   
   if(check)
-    checkDVI(pm, am, missing, pairings = pairings, ignoreSex = ignoreSex)
+    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex)
   
   ### Mutation disabling
-  if(any(allowsMutations(am))) {
+  if(any(allowsMutations(dvi$am))) {
+    am = dvi$am
     
     if(verbose) 
       message("\nMutation modelling:")
@@ -84,7 +92,7 @@ jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignm
       disableFams = seq_along(am)
     }
     else if(identical(disableMutations, NA)) {
-      am.nomut = pedprobr::setMutationModel(am, model = NULL)
+      am.nomut = setMutmod(am, model = NULL)
       badFams = vapply(am.nomut, loglikTotal, FUN.VALUE = 1) == -Inf
       if(verbose) {
         if(any(badFams)) 
@@ -96,60 +104,77 @@ jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignm
     else disableFams = NULL
   
     if(length(disableFams)) {
-      am[disableFams] = setMutationModel(am[disableFams], model = NULL)
+      am[disableFams] = setMutmod(am[disableFams], model = NULL)
     }
+    
+    # Update DVI object
+    dvi$am = am
   }
   
   ### Identify and fixate "undisputed" matches
-  undisp = list()
+  undisp = as.data.frame(list())
   
   if(undisputed && is.null(assignments)) {
     
-    if(verbose) {
-      message("\nUndisputed matches:")
-      message(" Pairwise LR threshold = ", threshold)
-    }
-    
-    r = findUndisputed(pm, am, missing, pairings = pairings, ignoreSex = ignoreSex, threshold = threshold, 
-                       relax = relax, limit = limit, check = FALSE, verbose = verbose)
+    r = findUndisputed(dvi, pairings = pairings, ignoreSex = ignoreSex, threshold = threshold, 
+                       relax = relax, limit = limit, nkeep = nkeep, check = FALSE, 
+                       numCores = numCores, verbose = verbose)
     
     # List of undisputed, and their LR's
-    undisp = r$undisp 
+    undisp = r$undisputed
+    Nun = nrow(undisp)
     
     # If all are undisputed, return early
-    if(length(undisp) == length(pm)) {
-      solution = as.data.frame(lapply(undisp, function(v) v$match))
+    # Either all *victims* are matched or all *missing* are identified
+    # The code below covers both scenarios
+    if(Nun == length(dvi$pm) || Nun == length(dvi$missing)) {
+      
+      # Build solution assignment (must be a data frame)
+      sol = rep(list("*"), length(dvi$pm))
+      names(sol) = vics
+      sol[undisp$Sample] = undisp$Missing
+      sol = as.data.frame(sol)
       
       # Run through jointDVI() with the solution as the only assignment 
-      res = jointDVI(pm, am, missing, ignoreSex = ignoreSex, assignments = solution, undisputed = FALSE,
+      res = jointDVI(dvi, ignoreSex = ignoreSex, assignments = sol, undisputed = FALSE,
                      markers = markers, threshold = NULL, check = FALSE, verbose = FALSE)
       return(res)
     }
     
     # Reduced DVI problem to be used in the joint analysis
-    pm = r$pmReduced
-    am = r$amReduced
-    missing = r$missingReduced
-    vics = names(pm)
+    dvi = r$dviReduced
+    vics = names(dvi$pm)
     
     # pairings: These exclude those with LR = 0!
     pairings = r$pairings
-  }
     
-  if(is.null(pairings) && is.null(assignments)) {
-    pairings = pairwiseLR(pm, am, missing = missing, pairings = pairings, ignoreSex = ignoreSex, limit = limit)$pairings
+    if(verbose && Nun > 0)
+      print.dviData(dvi, heading = "\nReduced DVI dataset:")
   }
+  
+  pm = dvi$pm 
+  am = dvi$am
+  
+  if(is.null(pairings) && is.null(assignments))
+    pairings = pairwiseLR(dvi, pairings = pairings, ignoreSex = ignoreSex, limit = limit, nkeep = nkeep)$pairings
  
   if(is.null(assignments)) {
+    if(verbose) message("\nCalculating pairing combinations")
     # Expand pairings to assignment data frame
-    assignments = expand.grid.nodup(pairings)
+    assignments = expand.grid.nodup(pairings, max = maxAssign)
+  }
+  else {
+    if(verbose) message("\nChecking supplied pairing combinations")
+    if(!setequal(names(assignments), origVics))
+      stop2("Names of `assignments` do not match `pm` names")
+    assignments = assignments[origVics]
   }
   
   nAss = nrow(assignments)
   if(nAss == 0)
-    stop("No possible solutions!")
+    stop2("No possible solutions!")
   if(verbose)
-    message("\nAssignments to consider in the joint analysis: ", nAss, "\n")
+    message("Assignments to consider in the joint analysis: ", nAss, "\n")
   
   # Convert to list; more handy below
   assignmentList = lapply(1:nAss, function(i) as.character(assignments[i, ]))
@@ -160,25 +185,35 @@ jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignm
   
   loglik0 = sum(logliks.PM) + sum(logliks.AM)
   if(loglik0 == -Inf)
-    stop("Impossible initial data: AM component ", toString(which(logliks.AM == -Inf)))
-  
+    stop2("Impossible initial data: AM component ", which(logliks.AM == -Inf))
   
   # Parallelise
   if(numCores > 1) {
+    
+    if(verbose) 
+      message("Using ", numCores, " cores")
+    
     cl = makeCluster(numCores)
     on.exit(stopCluster(cl))
     clusterEvalQ(cl, library(dvir))
     clusterExport(cl, "loglikAssign", envir = environment())
-    
-    if(verbose) message("Using ", length(cl), " cores")
-    
+
     # Loop through assignments
     loglik = parLapply(cl, assignmentList, function(a) 
       loglikAssign(pm, am, vics, a, loglik0, logliks.PM, logliks.AM))
   }
   else {
-    loglik = lapply(assignmentList, function(a) 
-      loglikAssign(pm, am, vics, a, loglik0, logliks.PM, logliks.AM))
+    # Setup progress bar
+    if(progbar <- verbose && interactive())
+      pb = txtProgressBar(min = 0, max = nAss, style = 3)
+    
+    loglik = lapply(seq_len(nAss), function(i) {
+      if(progbar) setTxtProgressBar(pb, i)
+      loglikAssign(pm, am, vics, assignmentList[[i]], loglik0, logliks.PM, logliks.AM)
+    })
+    
+    # Close progress bar
+    if(progbar) close(pb)
   }
   
   loglik = unlist(loglik)
@@ -187,15 +222,16 @@ jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignm
   posterior = LR/sum(LR) # assumes a flat prior
   
   # Add undisputed matches
-  if(length(undisp)) {
+  Nun = nrow(undisp)
+  if(Nun > 0) {
     # Add ID columns
-    for(v in names(undisp)) assignments[[v]] = undisp[[v]]$match
+    assignments[, undisp$Sample] = rep(undisp$Missing, each = nAss)
     
     # Fix ordering
     assignments = assignments[origVics]
     
     # Fix LR: Multiply with that of the undisputed
-    LR = LR * prod(sapply(undisp, `[[`, "LR"))
+    LR = LR * prod(undisp$LR)
   }
     
   # Collect results
@@ -215,6 +251,25 @@ jointDVI = function(pm, am, missing, pairings = NULL, ignoreSex = FALSE, assignm
   tab
 }
 
+#' @rdname jointDVI
+#' @export
+compactJointRes = function(jointRes, LRthresh = NULL) {
+  if(!is.null(LRthresh)) {
+    # Require LR > threshold
+    keepRows = jointRes$LR >= LRthresh
+    
+    # Also require LR_1:a > threshold  (i.e. with top result as numerator)
+    logLRtop = jointRes$loglik[1] - jointRes$loglik
+    keepRows = keepRows & logLRtop - log(LRthresh) < sqrt(.Machine$double.eps)
+    
+    # Last row to keep
+    last = match(TRUE, keepRows, nomatch = 0L) + 1L
+    jointRes = jointRes[1:last, , drop = FALSE]
+  }
+  
+  empty = sapply(jointRes, function(v) all(v == "*"))
+  jointRes[, !empty, drop = FALSE]
+}
 
 
 # Function for computing the total log-likelihood of a single assignment
@@ -243,98 +298,4 @@ loglikAssign = function(pm, am, vics, assignment, loglik0, logliks.PM, logliks.A
   
   # Return total loglik of assignments
   sum(logliks.PM.new) + sum(logliks.AM.new)
-}
-
-
-
-# @rdname jointDVI
-# @export
-checkDVI = function(pm, am, missing, pairings, errorIfEmpty = FALSE, ignoreSex = FALSE){
-  
-  # MDV: added to avoid crash in certain cases.
-  if(length(pm) == 0 || length(missing) == 0) {
-    if(errorIfEmpty) stop("Empty DVI problem") 
-    else return()
-  }
-  
-  if(!all(missing %in% unlist(labels(am))))
-    stop("Missing person not part of the AM pedigree(s): ", toString(setdiff(missing, unlist(labels(am)))))
-  
-  if(is.null(pairings))
-    return()
-  
-  vics = unlist(labels(pm))
-  vicSex = getSex(pm, vics, named = TRUE)
-  
-  candidMP = setdiff(unlist(pairings), "*")
-  candidSex = getSex(am, candidMP, named = TRUE)
-              
-  if(!all(candidMP %in% missing))
-    stop("Indicated pairing candidate is not a missing person: ", toString(setdiff(candidMP, missing)))
-  
-  for(v in vics) {
-    candid = pairings[[v]]
-    if(length(candid) == 0)
-      stop("No available candidate for victim ", v)
-    
-    if(any(duplicated(candid)))
-      stop("Duplicated candidate for victim ", v)
-    
-    cand = setdiff(candid, "*")
-    if(length(cand) == 0)
-      next
-    
-    if(!ignoreSex) {
-      correctSex = candidSex[cand] == vicSex[v]
-      if(!all(correctSex)) 
-        stop("Candidate for victim ", v, " has wrong sex: ", toString(cand[correctSex]))
-    }
-  }
-}
-
-
-#' Summarise a DVI problem
-#'
-#' Prints a summary of a given DVI problem, including the number of victims,
-#' missing persons, reference families and typed reference individuals. This
-#' function primarily exists for being called from `jointDVI()` and other
-#' high-level methods, but can also be used on its own.
-#'
-#' @param pm A list of singletons.
-#' @param am A list of pedigrees.
-#' @param missing Character vector with names of missing persons.
-#' @param method A character, used by other methods.
-#' @param printMax A positive integer. Vectors longer than this are truncated.
-#'
-#' @return No return value, called for side effects.
-#'
-#' @examples
-#' pm = planecrash$pm
-#' am = planecrash$am
-#' missing = planecrash$missing
-#'
-#' summariseDVI(pm, am, missing)
-#' summariseDVI(pm, am, missing, printMax = 5)
-#'
-#' @export
-summariseDVI = function(pm, am, missing, method = NULL, printMax = 10) {
-  vics = unlist(labels(pm))
-  refs = typedMembers(am)
-  nam = if(is.ped(am)) 1 else length(am)
-
-  message("DVI problem:")
-  message(sprintf(" %d victims: %s", length(pm), trunc(vics, printMax)))
-  message(sprintf(" %d missing: %s", length(missing), trunc(missing, printMax)))
-  message(sprintf(" %d typed refs: %s", length(refs), trunc(refs, printMax)))
-  message(sprintf(" %d reference famil%s", nam, ifelse(nam == 1, "y", "ies")))
-  if(!is.null(method))
-    message("\n", method)
-}
-
-
-trunc = function(x, printMax = 10) {
-  if(length(x) <= printMax)
-    return(toString(x))
-  y = c(x[1:5], "...", x[length(x)])
-  toString(y)
 }

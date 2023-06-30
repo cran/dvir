@@ -5,37 +5,36 @@
 \title{Pairwise LR matrix}
 \usage{
 pairwiseLR(
-  pm,
-  am,
-  missing,
+  dvi,
   pairings = NULL,
   ignoreSex = FALSE,
   limit = 0,
   nkeep = NULL,
   check = TRUE,
+  numCores = 1,
   verbose = FALSE
 )
 }
 \arguments{
-\item{pm}{A list of singletons, the victims.}
-
-\item{am}{A list of pedigrees. The reference families.}
-
-\item{missing}{A character vector with names of missing persons.}
+\item{dvi}{A \code{dviData} object, typically created with \code{\link[=dviData]{dviData()}}.}
 
 \item{pairings}{A list of possible pairings for each victim. If NULL, all
 sex-consistent pairings are used.}
 
 \item{ignoreSex}{A logical.}
 
-\item{limit}{A nonnegative number controlling the \code{pairing} slot of the
+\item{limit}{A nonnegative number controlling the \code{pairings} slot of the
 output: Only pairings with LR greater or equal to \code{limit} are kept. If zero
 (default), pairings with LR > 0 are kept.}
 
-\item{nkeep}{An integer. No of pairings to keep, all if \code{NULL}.}
+\item{nkeep}{An integer, or NULL. If given, only the \code{nkeep} most likely
+pairings are kept for each victim.}
 
 \item{check}{A logical, indicating if the input data should be checked for
 consistency.}
+
+\item{numCores}{An integer; the number of cores used in parallelisation.
+Default: 1.}
 
 \item{verbose}{A logical.}
 }
@@ -56,11 +55,6 @@ ratios \eqn{LR_{i,j}} comparing \eqn{V_i = M_j} to the null. The output may
 be reduced by specifying arguments \code{limit} or \code{nkeep}.
 }
 \examples{
-
-pm = example1$pm
-am = example1$am
-missing = example1$missing
-
-pairwiseLR(pm, am, missing)
+pairwiseLR(example1, verbose = TRUE)
 
 }

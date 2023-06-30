@@ -1,71 +1,63 @@
 #' Automatic labelling of a DVI dataset
 #'
-#' Relabel the families and individuals in a DVI dataset, using automatic
-#' labelling.
+#' Relabel the individuals and families in a DVI dataset.
 #'
-#' By default, the following labelling scheme is applied:
-#'
-#' * Victims (PM data): V1, V2, ...
-#'
-#' * Reference families: F1, F2, ...
-#'
-#' * Reference individuals: R1, R2, ...
-#'
-#' * Missing persons: M1, M2, ...
-#'
-#' * Others: 1, 2, ...
-#'
-#' @param pm A list of singletons.
-#' @param am A list of pedigrees.
-#' @param missing Character vector with names of missing persons.
+#' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param victimPrefix Prefix used to label PM individuals.
 #' @param familyPrefix Prefix used to label the AM families.
 #' @param refPrefix Prefix used to label the reference individuals, i.e., the
 #'   typed members of the AM families.
-#' @param missingPrefix Prefix used to label the missing persons in the AM
-#'   families. The word "family" is treated as a special case, where the family
-#'   name is used as prefix in each family, e.g., F1-1, F1-2, F2-1, ...
-#' @param othersPrefix Prefix used to label other untyped individuals. Default:
-#'   1, 2, ...
+#' @param missingPrefix Prefix used to label the missing persons. At most one of
+#'   `missingPrefix` and `missingFormat` can be given.
+#' @param missingFormat A string indicating family-wise labelling of missing
+#'   persons, using `[FAM]`, `[IDX]`, `[MIS]` as place holders with the
+#'   following meanings (see Examples):
+#'   * `[FAM]`: family index
+#'   * `[IDX]`: index of missing person within the family
+#'   * `[MIS]`: index within all missing persons
+#' @param othersPrefix Prefix used to label other untyped individuals. Use ""
+#'   for numeric labels ( 1, 2, ...).
 #'
-#' @return A list with entries "pm", "am" and "missing".
+#' @return A [dviData()] object.
 #'
 #' @examples
 #'
 #' # Builtin dataset `example2`
-#' pm = example2$pm
-#' am = example2$am
-#' missing = example2$missing
-#'
-#' relabelDVI(pm, am, missing,
+#' relabelDVI(example2,
 #'            victimPrefix  = "vic",
 #'            familyPrefix  = "fam",
 #'            refPrefix     = "ref",
 #'            missingPrefix = "mp")
 #'
-#' # Family-wise numbering of missing persons
-#' relabelDVI(pm, am, missing, missingPrefix = "family")
+#' # Family-wise labelling of missing persons
+#' relabelDVI(example2, missingFormat = "M[FAM]-[IDX]")
+#' relabelDVI(example2, missingFormat = "M[IDX] (F[FAM])")
+#' relabelDVI(example2, missingFormat = "fam[FAM].m[IDX]")
 #'
 #' @export
-relabelDVI = function(pm, am, missing, 
-                        victimPrefix = "V", familyPrefix = "F",
-                        refPrefix = "R", missingPrefix = "M", othersPrefix = "") {
+relabelDVI = function(dvi, victimPrefix = NULL, familyPrefix = NULL,
+                      refPrefix = NULL, missingPrefix = NULL, 
+                      missingFormat = NULL,
+                      othersPrefix = NULL) {
   
-  if(is.singleton(pm)) 
-    pm = list(pm)
-  if(is.ped(am)) 
-    am = list(am)
+  dvi = consolidateDVI(dvi)
+  
+  pm = dvi$pm
+  am = dvi$am
+  missing = dvi$missing
   
   npm = length(pm)
   nam = length(am)
   nmiss = length(missing)
   
+  if(identical(missingPrefix, "family") && is.null(names(am)) && is.null(familyPrefix))
+    familyPrefix = "F"
   
   # Relabel PM data
   if(!is.null(victimPrefix)) {
     
     if(length(victimPrefix) != 1)
-      stop("`victimPrefix` must have length 1: ", victimPrefix)
+      stop2("`victimPrefix` must have length 1: ", victimPrefix)
     
     newvics = paste0(victimPrefix, 1:npm)
     pm = relabel(pm, newvics)
@@ -76,7 +68,7 @@ relabelDVI = function(pm, am, missing,
   if(!is.null(refPrefix)) {
     
     if(length(refPrefix) != 1)
-      stop("`refPrefix` must have length 1: ",     refPrefix)
+      stop2("`refPrefix` must have length 1: ", refPrefix)
     
     refs = typedMembers(am)
     nrefs = length(refs)
@@ -87,43 +79,66 @@ relabelDVI = function(pm, am, missing,
   if(!is.null(familyPrefix)) {
     
     if(length(familyPrefix) != 1)
-      stop("`familyPrefix` must have length 1: ",  familyPrefix)
+      stop2("`familyPrefix` must have length 1: ", familyPrefix)
     
     names(am) = paste0(familyPrefix, 1:nam)
   }
   
   
   # Relabel missing persons
-  if(!is.null(missingPrefix)) {
+  if(!is.null(missingPrefix) || !is.null(missingFormat)) {
   
-    if(length(missingPrefix) != 1)
-      stop("`missingPrefix` must have length 1: ", missingPrefix)
+    if(!is.null(missingPrefix) && !is.null(missingFormat))
+      stop2("At most one of `missingPrefix` and `missingFormat` can be used")
     
     # Preliminary fix if same label is used in multiple components (e.g. "Missing person")
-    if(nmiss == 1) {
-      ocs = sapply(labels(am), function(v) missing %in% v)
-      if(sum(ocs) > 1) {
-        for(i in which(ocs)) 
-          am[[i]] = relabel(am[[i]], missing, new = paste(missing, i))
-        missing = paste(missing, which(ocs))
-        nmiss = length(missing)
-      }
-    }
-        
-    # Special case
-    if(identical(missingPrefix, "family")) {
-      newmiss = character(nmiss)
-      names(newmiss) = missing
+    labs = unlist(labels(am), use.names = FALSE)
+    if(any(labs[duplicated(labs)] %in% missing)) {
+      tmpmiss = character()
       
-      for(famname in names(am)) {
-        m = intersect(missing, labels(am[[famname]]))
-        newmiss[m] = paste(famname, seq_along(m), sep = "-")
+      for(i in seq_along(am)) {
+        comp = am[[i]]
+        missi = intersect(missing, comp$ID)
+        if(!length(missi))
+          next
+        am[[i]] = relabel(comp, missi, new = paste(missi, i, sep = "."))
+        tmpmiss = c(tmpmiss, paste(missi, i, sep = "."))
       }
-    } 
-    else {
+      
+      missing = tmpmiss
+      nmiss = length(missing)
+    }
+    
+    # Regular prefix format
+    if(!is.null(missingPrefix)){
+      
+      if(length(missingPrefix) != 1)
+        stop2("`missingPrefix` must have length 1: ", missingPrefix)
+      
       # Default case
       newmiss = paste0(missingPrefix, 1:nmiss)
-    }
+    }    
+    
+    # Special format
+    if(!is.null(missingFormat)) {
+      
+      if(length(missingFormat) != 1)
+        stop2("`missingFormat` must have length 1: ", missingFormat)
+      
+      mis = seq_len(nmiss)
+      fam = getComponent(am, missing)
+      idx = integer(length(missing))
+      for(i in unique.default(fam))
+        idx[fam == i] = seq_len(sum(fam == i))
+      
+      fmt = sub("[FAM]", "%{fam}d", fixed = TRUE,
+                sub("[IDX]", "%{idx}d", fixed = TRUE,
+                    sub("[MIS]", "%{mis}d", missingFormat, fixed = TRUE)))
+      newmiss = sprintfNamed(fmt, fam = fam, idx = idx, mis = mis)
+      
+      if(length(newmiss) != nmiss)
+        newmiss = rep_len(newmiss, length.out = nmiss)
+    } 
     
     # Relabel
     am = relabel(am, old = missing, new = newmiss)
@@ -132,12 +147,11 @@ relabelDVI = function(pm, am, missing,
     missing = as.character(newmiss)
   }
   
-  
   # Other untyped individuals
   if(!is.null(othersPrefix)) {
     
     if(length(othersPrefix) != 1)
-      stop("`othersPrefix` must have length 1: ",  othersPrefix)
+      stop2("`othersPrefix` must have length 1: ", othersPrefix)
   
     k = 0
     for(i in 1:nam) {
@@ -149,8 +163,7 @@ relabelDVI = function(pm, am, missing,
     }
   }
   
-  
-  # Return new objects
-  list(pm = pm, am = am, missing = missing)
+  # Return new object
+  dviData(pm = pm, am = am, missing = missing)
 }
 

@@ -5,22 +5,17 @@
 \title{Automatic labelling of a DVI dataset}
 \usage{
 relabelDVI(
-  pm,
-  am,
-  missing,
-  victimPrefix = "V",
-  familyPrefix = "F",
-  refPrefix = "R",
-  missingPrefix = "M",
-  othersPrefix = ""
+  dvi,
+  victimPrefix = NULL,
+  familyPrefix = NULL,
+  refPrefix = NULL,
+  missingPrefix = NULL,
+  missingFormat = NULL,
+  othersPrefix = NULL
 )
 }
 \arguments{
-\item{pm}{A list of singletons.}
-
-\item{am}{A list of pedigrees.}
-
-\item{missing}{Character vector with names of missing persons.}
+\item{dvi}{A \code{dviData} object, typically created with \code{\link[=dviData]{dviData()}}.}
 
 \item{victimPrefix}{Prefix used to label PM individuals.}
 
@@ -29,44 +24,39 @@ relabelDVI(
 \item{refPrefix}{Prefix used to label the reference individuals, i.e., the
 typed members of the AM families.}
 
-\item{missingPrefix}{Prefix used to label the missing persons in the AM
-families. The word "family" is treated as a special case, where the family
-name is used as prefix in each family, e.g., F1-1, F1-2, F2-1, ...}
+\item{missingPrefix}{Prefix used to label the missing persons. At most one of
+\code{missingPrefix} and \code{missingFormat} can be given.}
 
-\item{othersPrefix}{Prefix used to label other untyped individuals. Default:
-1, 2, ...}
+\item{missingFormat}{A string indicating family-wise labelling of missing
+persons, using \verb{[FAM]}, \verb{[IDX]}, \verb{[MIS]} as place holders with the
+following meanings (see Examples):
+\itemize{
+\item \verb{[FAM]}: family index
+\item \verb{[IDX]}: index of missing person within the family
+\item \verb{[MIS]}: index within all missing persons
+}}
+
+\item{othersPrefix}{Prefix used to label other untyped individuals. Use ""
+for numeric labels ( 1, 2, ...).}
 }
 \value{
-A list with entries "pm", "am" and "missing".
+A \code{\link[=dviData]{dviData()}} object.
 }
 \description{
-Relabel the families and individuals in a DVI dataset, using automatic
-labelling.
-}
-\details{
-By default, the following labelling scheme is applied:
-\itemize{
-\item Victims (PM data): V1, V2, ...
-\item Reference families: F1, F2, ...
-\item Reference individuals: R1, R2, ...
-\item Missing persons: M1, M2, ...
-\item Others: 1, 2, ...
-}
+Relabel the individuals and families in a DVI dataset.
 }
 \examples{
 
 # Builtin dataset `example2`
-pm = example2$pm
-am = example2$am
-missing = example2$missing
-
-relabelDVI(pm, am, missing,
+relabelDVI(example2,
            victimPrefix  = "vic",
            familyPrefix  = "fam",
            refPrefix     = "ref",
            missingPrefix = "mp")
 
-# Family-wise numbering of missing persons
-relabelDVI(pm, am, missing, missingPrefix = "family")
+# Family-wise labelling of missing persons
+relabelDVI(example2, missingFormat = "M[FAM]-[IDX]")
+relabelDVI(example2, missingFormat = "M[IDX] (F[FAM])")
+relabelDVI(example2, missingFormat = "fam[FAM].m[IDX]")
 
 }

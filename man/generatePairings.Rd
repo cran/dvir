@@ -4,14 +4,10 @@
 \alias{generatePairings}
 \title{Sex-consistent pairings}
 \usage{
-generatePairings(pm, am, missing, includeEmpty = TRUE, ignoreSex = FALSE)
+generatePairings(dvi, includeEmpty = TRUE, ignoreSex = FALSE)
 }
 \arguments{
-\item{pm}{A list of singletons.}
-
-\item{am}{A list of pedigrees.}
-
-\item{missing}{Character vector with names of missing persons.}
+\item{dvi}{A \code{dviData} object, typically created with \code{\link[=dviData]{dviData()}}.}
 
 \item{includeEmpty}{A logical. If TRUE (default), the do-nothing symbol (\code{*})
 is included for each victim.}
@@ -30,11 +26,13 @@ By default, the empty pairing (denoted \code{*}) is included for each victim.
 
 pm = list(singleton("V1", sex = 1),
           singleton("V2", sex = 2))
-
+          
 missing = paste0("M", 1:4)
 am = list(nuclearPed(children = missing[1:3]),
           nuclearPed(children = missing[4], sex = 2))
-generatePairings(pm, am, missing)
+
+dvi = dviData(pm, am, missing)
+generatePairings(dvi)
 
 }
 \seealso{

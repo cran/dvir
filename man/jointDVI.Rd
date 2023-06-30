@@ -2,32 +2,31 @@
 % Please edit documentation in R/jointDVI.R
 \name{jointDVI}
 \alias{jointDVI}
+\alias{compactJointRes}
 \title{Joint DVI search}
 \usage{
 jointDVI(
-  pm,
-  am,
-  missing,
+  dvi,
   pairings = NULL,
   ignoreSex = FALSE,
   assignments = NULL,
   limit = 0,
+  nkeep = NULL,
   undisputed = TRUE,
   markers = NULL,
   threshold = 10000,
   relax = FALSE,
   disableMutations = NA,
+  maxAssign = 1e+05,
   numCores = 1,
   check = TRUE,
   verbose = TRUE
 )
+
+compactJointRes(jointRes, LRthresh = NULL)
 }
 \arguments{
-\item{pm}{A list of singletons.}
-
-\item{am}{A list of pedigrees.}
-
-\item{missing}{Character vector with names of missing persons.}
+\item{dvi}{A \code{dviData} object, typically created with \code{\link[=dviData]{dviData()}}.}
 
 \item{pairings}{A list of possible pairings for each victim. If NULL, all
 sex-consistent pairings are used.}
@@ -40,6 +39,9 @@ taking all combinations from \code{pairings}.}
 
 \item{limit}{A positive number, by default 0. Only pairwise LR values above
 this are considered.}
+
+\item{nkeep}{An integer, or NULL. If given, only the \code{nkeep} most likely
+pairings are considered for each victim.}
 
 \item{undisputed}{A logical, by default TRUE.}
 
@@ -54,19 +56,31 @@ analysis. By default all markers are included.}
 \item{disableMutations}{A logical, or NA (default). The default action is to
 disable mutations in all reference families without Mendelian errors.}
 
-\item{numCores}{Integer. The number of cores used in parallelisation.
+\item{maxAssign}{A positive integer. If the number of assignments going into
+the joint calculation exceeds this, the function will abort with an
+informative error message. Default: 1e5.}
+
+\item{numCores}{An integer; the number of cores used in parallelisation.
 Default: 1.}
 
 \item{check}{A logical, indicating if the input data should be checked for
 consistency.}
 
 \item{verbose}{A logical.}
+
+\item{jointRes}{A data frame produced by \code{jointDVI()}.}
+
+\item{LRthresh}{A positive number, used as upper limit for the LR comparing the
+top result with all others.}
 }
 \value{
 A data frame. Each row describes an assignment of victims to missing
 persons, accompanied with its log likelihood, the LR compared to the null
 (i.e., no identifications), and the posterior corresponding to a flat
 prior.
+
+The function \code{compactJointRes()} removes columns without assignments, and
+solutions whose LR compared with the top result is below \code{1/LRthresh}.
 }
 \description{
 Victims are given as a list of singletons, and references as a list of
@@ -74,11 +88,7 @@ pedigrees. All possible assignments are evaluated and solutions ranked
 according to the likelihood.
 }
 \examples{
-pm = example2$pm
-am = example2$am
-missing = example2$missing
-
-jointDVI(pm, am, missing)
+jointDVI(example2)
 
 }
 \seealso{
