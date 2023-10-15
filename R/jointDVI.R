@@ -25,7 +25,8 @@
 #'   informative error message. Default: 1e5.
 #' @param threshold A positive number, passed onto [findUndisputed()]. Default:
 #'   1e4.
-#' @param relax A logical, passed onto [findUndisputed()]. Default: FALSE.
+#' @param strict A logical, passed onto [findUndisputed()]. Default: FALSE.
+#' @param relax Deprecated.
 #' @param numCores An integer; the number of cores used in parallelisation.
 #'   Default: 1.
 #' @param check A logical, indicating if the input data should be checked for
@@ -55,7 +56,7 @@
 #' @export
 jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL, 
                     limit = 0, nkeep = NULL, undisputed = TRUE, markers = NULL, 
-                    threshold = 1e4, relax = FALSE, disableMutations = NA, 
+                    threshold = 1e4, strict = FALSE, relax = !strict, disableMutations = NA, 
                     maxAssign = 1e5, numCores = 1, check = TRUE, verbose = TRUE) {
   
   st = Sys.time()
@@ -78,17 +79,17 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     print.dviData(dvi)
   
   if(check)
-    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex)
+    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex, verbose = verbose)
   
   ### Mutation disabling
   if(any(allowsMutations(dvi$am))) {
     am = dvi$am
     
     if(verbose) 
-      message("\nMutation modelling:")
+      cat("\nMutation modelling:\n")
     
     if(isTRUE(disableMutations)) {
-      if(verbose) message(" Disabling mutations in all families")
+      if(verbose) cat(" Disabling mutations in all families\n")
       disableFams = seq_along(am)
     }
     else if(identical(disableMutations, NA)) {
@@ -96,8 +97,8 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
       badFams = vapply(am.nomut, loglikTotal, FUN.VALUE = 1) == -Inf
       if(verbose) {
         if(any(badFams)) 
-          message(" ", sum(badFams), " inconsistent families: ", trunc(which(badFams)))
-        message(" ", sum(!badFams), " consistent families. Disabling mutations in these")
+          cat("", sum(badFams), "inconsistent families:", trunc(which(badFams)), "\n")
+        cat("", sum(!badFams), "consistent families. Disabling mutations in these\n")
       }
       disableFams = which(!badFams)
     }
@@ -117,11 +118,11 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   if(undisputed && is.null(assignments)) {
     
     r = findUndisputed(dvi, pairings = pairings, ignoreSex = ignoreSex, threshold = threshold, 
-                       relax = relax, limit = limit, nkeep = nkeep, check = FALSE, 
+                       strict = strict, limit = limit, nkeep = nkeep, check = FALSE, 
                        numCores = numCores, verbose = verbose)
     
     # List of undisputed, and their LR's
-    undisp = r$undisputed
+    undisp = r$summary
     Nun = nrow(undisp)
     
     # If all are undisputed, return early
@@ -159,12 +160,12 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     pairings = pairwiseLR(dvi, pairings = pairings, ignoreSex = ignoreSex, limit = limit, nkeep = nkeep)$pairings
  
   if(is.null(assignments)) {
-    if(verbose) message("\nCalculating pairing combinations")
+    if(verbose) cat("\nCalculating pairing combinations\n")
     # Expand pairings to assignment data frame
     assignments = expand.grid.nodup(pairings, max = maxAssign)
   }
   else {
-    if(verbose) message("\nChecking supplied pairing combinations")
+    if(verbose) cat("\nChecking supplied pairing combinations\n")
     if(!setequal(names(assignments), origVics))
       stop2("Names of `assignments` do not match `pm` names")
     assignments = assignments[origVics]
@@ -174,7 +175,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   if(nAss == 0)
     stop2("No possible solutions!")
   if(verbose)
-    message("Assignments to consider in the joint analysis: ", nAss, "\n")
+    cat("Assignments to consider in the joint analysis:", nAss, "\n\n")
   
   # Convert to list; more handy below
   assignmentList = lapply(1:nAss, function(i) as.character(assignments[i, ]))
@@ -191,7 +192,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   if(numCores > 1) {
     
     if(verbose) 
-      message("Using ", numCores, " cores")
+      cat("Using", numCores, "cores\n")
     
     cl = makeCluster(numCores)
     on.exit(stopCluster(cl))
@@ -227,6 +228,11 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     # Add ID columns
     assignments[, undisp$Sample] = rep(undisp$Missing, each = nAss)
     
+    # Bug fix: Add * columns for victims lost in `subsetDVI` in undisputed
+    missVic = setdiff(origVics, names(assignments))
+    for(v in missVic)
+      assignments[[v]] = "*"
+    
     # Fix ordering
     assignments = assignments[origVics]
     
@@ -246,7 +252,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   rownames(tab) = NULL
   
   if(verbose)
-    message("Time used: ", format(Sys.time() - st, digits = 3))
+    cat("Time used:", format(Sys.time() - st, digits = 3), "\n")
   
   tab
 }
@@ -258,7 +264,7 @@ compactJointRes = function(jointRes, LRthresh = NULL) {
     # Require LR > threshold
     keepRows = jointRes$LR >= LRthresh
     
-    # Also require LR_1:a > threshold  (i.e. with top result as numerator)
+    # Also require LR_1:a > threshold (i.e. with top result as numerator)
     logLRtop = jointRes$loglik[1] - jointRes$loglik
     keepRows = keepRows & logLRtop - log(LRthresh) < sqrt(.Machine$double.eps)
     

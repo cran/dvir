@@ -84,13 +84,12 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
       print(dvi, printMax = 10)
     else
       print(dvi[[1]], printMax = 10)
-    message("\nParameters for DVI comparison:")
-    message(" True solution: ", toString(true))
-    message(" Simulate data: ", simulate)
-    message(" Number of sims: ", if(simulate) Nsim else length(dvi$pm))
-    message(" Reference IDs: ", toString(refs))
-    message(" LR threshold: ", threshold)
-    message("")
+    cat("\nParameters for DVI comparison:\n")
+    cat(" True solution:", toString(true), "\n")
+    cat(" Simulate data:", simulate, "\n")
+    cat(" Number of sims:", if(simulate) Nsim else length(dvi$pm), "\n")
+    cat(" Reference IDs:", toString(refs))
+    cat(" LR threshold:", threshold, "\n\n")
   }
   
   if(simulate) {
@@ -159,7 +158,7 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
   if(paral <- (numCores > 1)) {
     cl = makeCluster(numCores)
     if(verbose) 
-      message("Using ", length(cl), " cores")
+      cat("Using", length(cl), "cores\n")
     on.exit(stopCluster(cl))
     clusterEvalQ(cl, library(dvir))
     # clusterExport(cl, c("missing"), envir = environment())
@@ -212,7 +211,7 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
     if(verbose) print(res['method5'])
   }
   
-  # Approach 6: Joint  + threshold (LR < thresh => *-*-*)
+  # Approach 6: Joint + threshold (LR < thresh => *-*-*)
   if(6 %in% methods) {
     method6 = if(paral) parLapply(cl, 1:N, fun6) else lapply(1:N, fun6)
     res$method6 = summar(method6)
@@ -225,7 +224,7 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
   res$TPR = TPR
   
   if(verbose)
-    message("Total time used: ", format(Sys.time() - st, digits = 3))
+    cat("Total time used:", format(Sys.time() - st, digits = 3), "\n")
   
   res
 }

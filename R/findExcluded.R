@@ -1,14 +1,23 @@
 #' Excluded individuals and pairings in a DVI dataset
 #'
+#' Analysing exclusions is often an efficient way to reduce large DVI datasets.
+#' A pairing V = M is *excluded* if it implies (too many) genetic
+#' inconsistencies. The function `findExcluded()` identifies and removes (i)
+#' victim samples with too many inconsistencies against all missing persons,
+#' (ii) missing persons with too many inconsistencies against all victim
+#' samples, and (iii) inconsistent pairings among the remaining.
+#'
+#' The main calculation in `findExcluded()` is done by `exclusionMatrix()`,
+#' which records number of incompatible markers of each pairwise comparison.
+#'
 #' @param dvi A [dviData()] object.
 #' @param maxIncomp An integer. A pairing is excluded if the number of
 #'   incompatible markers exceeds this.
-#' @param pairings (Optional) A list of possible pairings for each victim. By
-#'   default, `dvi$pairings` is used, or, if this is NULL,
-#'   `generatePairings(dvi, ignoreSex = ignoreSex)`.
-#' @param ignoreSex A logical, relevant only if both `pairings` and
-#'   `dvi$pairings` are NULL. Default: FALSE.
-#' @param verbose A logical. Default: TRUE.
+#' @param pairings A list of possible pairings for each victim. By default,
+#'   `dvi$pairings` is used, or, if this is NULL, `generatePairings(dvi,
+#'   ignoreSex)`.
+#' @param ignoreSex A logical, by default: FALSE.
+#' @param verbose A logical, by default TRUE.
 #'
 #' @return A list with the following entries:
 #'
@@ -21,63 +30,61 @@
 #'       * `fam`: families in which all missing members are excluded against
 #'   all victim samples
 #'
-#'   The above elements are removed in the reduced dataset.
+#'   * `dviReduced`: A reduced version of `dvi`, where the excluded elements
+#'   are removed, and the pairings are updated.
 #'
-#'   * `dviReduced`: A reduced version of `dvi`, where excluded victims/missing
-#'   persons are removed.
-#'
-#'   * `report`: A list of data frames `PM` and `AM`, summarising the excluded 
+#'   * `summary`: A list of data frames `PM` and `AM`, summarising the excluded
 #'   individuals.
 #'
-#' @seealso [findUndisputed()]
+#' @seealso [findUndisputed()]. See also [forrel::findExclusions()] for analysis
+#'   of a specific pairwise comparison.
 #'
 #' @examples
-#' findExcluded(icmp)
+#' \donttest{
+#' e = findExcluded(icmp)
+#' e$summary
+#' e$exclusionMatrix
 #'
+#' # The exclusion matrix can also be computed directly:
+#' exclusionMatrix(icmp)
+#'
+#' # Inspect a particular pair: M4 vs V4
+#' forrel::findExclusions(icmp$am, id = "M4", candidate = icmp$pm$V4)
+#'
+#' # Plot one of the incompatible markers
+#' plotDVI(icmp, pm = 4, marker ="D7S820")
+#' }
 #' @export
 findExcluded = function(dvi, maxIncomp = 2, pairings = NULL, ignoreSex = FALSE, verbose = TRUE) {
   
   if(verbose) {
-    message("Finding exclusions")
-    message("Max incompatible markers = ", maxIncomp)
+    cat("Finding exclusions\n")
+    cat("Max incompatible markers =", maxIncomp, "\n")
   }
   
   # Ensure proper dviData object
   dvi = consolidateDVI(dvi)
   
-  pairings = pairings %||% dvi$pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
+  # Pairings
+  if(!missing(pairings) || !missing(ignoreSex))
+    pairings = pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
+  else
+    pairings = dvi$pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
   
-  pm = dvi$pm
   am = dvi$am
   missing = dvi$missing
-  vics = names(pm)
+  vics = names(dvi$pm)
+  comp = getFamily(dvi, missing)
   
-
-  # Exclusion matrix --------------------------------------------------------
-
-  # Initialise matrix
-  mat = matrix(NA_integer_, nrow = length(pm), ncol = length(missing), 
-               dimnames = list(vics, missing))
-  
-  # AM components (for use in output)
-  comp = getFamily(dvi, dvi$missing)
-  
-  # Loop through each pair of victim vs missing
-  for(vic in vics) {
-    vicdata = pm[[vic]]
-    compatMiss = setdiff(pairings[[vic]], "*")
-    for(mis in compatMiss) {
-      ref = am[[comp[mis]]]
-      mat[vic, mis] = length(findExclusions(ref, id = mis, candidate = vicdata))
-    }
-  }
+  # Main calculation: Exclusion matrix
+  mat = exclusionMatrix(dvi, pairings = pairings)
 
   # Utilities for analysing rows/cols of `mat`
   minEx = function(v)
     if(all(is.na(v))) Inf else min(v, na.rm = TRUE)
   
   commnt = function(v) 
-    ifelse(v == Inf, "no avail pairings", sprintf("min %s incons", v))
+    ifelse(v == Inf, "no compatible pairings", sprintf("min %s incons", v))
   
   # Victims excluded against all --------------------------------------------
   
@@ -86,18 +93,19 @@ findExcluded = function(dvi, maxIncomp = 2, pairings = NULL, ignoreSex = FALSE, 
   excludedVics = vics[pmNomatch]
   
   if(!length(excludedVics)) {
-    reportPM = NULL
+    summaryPM = NULL
     if(verbose)
-      message("\nPM samples excluded against all missing: None\n")
+      cat("\nPM samples excluded against all missing: None\n\n")
   }
   else {
-    reportPM = data.frame(Sample = excludedVics, 
-                          Conclusion = "excluded", 
-                          Comment = commnt(pmMinEx[pmNomatch]),
-                          row.names = NULL)
+    summaryPM = data.frame(Sample = excludedVics, 
+                           Conclusion = "Excluded", 
+                           Comment = commnt(pmMinEx[pmNomatch]),
+                           row.names = NULL)
     if(verbose) {
-      message("\nPM samples excluded against all missing:")
-      message(sprintf(" %s (%s)\n", reportPM$Sample, reportPM$Comment))
+      cat("\nPM samples excluded against all missing:\n")
+      cat(sprintf(" %s (%s)", summaryPM$Sample, summaryPM$Comment), sep = "\n")
+      cat("\n")
     }
   }
   
@@ -108,19 +116,20 @@ findExcluded = function(dvi, maxIncomp = 2, pairings = NULL, ignoreSex = FALSE, 
   excludedMissing = missing[missNomatch]
   
   if(!length(excludedMissing)) {
-    reportAM = NULL
+    summaryAM = NULL
     if(verbose)
-      message("Missing persons excluded against all PM samples: None\n")
+      cat("Missing persons excluded against all PM samples: None\n\n")
   }
   else {
-    reportAM = data.frame(Family = comp[excludedMissing],
-                          Missing = excludedMissing,
-                          Conclusion = "excluded",
-                          Comment = commnt(missMinEx[missNomatch]),
-                          row.names = NULL)
+    summaryAM = data.frame(Family = comp[excludedMissing],
+                           Missing = excludedMissing,
+                           Conclusion = "Excluded",
+                           Comment = commnt(missMinEx[missNomatch]),
+                           row.names = NULL)
     if(verbose) {
-      message("Missing persons excluded against all PM samples:")
-      message(sprintf(" %s (%s)\n", reportAM$Missing, reportAM$Comment))
+      cat("Missing persons excluded against all PM samples:\n")
+      cat(sprintf(" %s (%s)", summaryAM$Missing, summaryAM$Comment), sep = "\n")
+      cat("\n")
     }
   }
   
@@ -136,8 +145,6 @@ findExcluded = function(dvi, maxIncomp = 2, pairings = NULL, ignoreSex = FALSE, 
   if(length(excludedVics) + length(excludedMissing) > 0) {
     dviRed = subsetDVI(dvi, pm = keepVics, missing = keepMissing, verbose = verbose)
   } else {
-    if(verbose) 
-      message("No reduction of the DVI dataset")
     dviRed = dvi
   }
   
@@ -145,78 +152,60 @@ findExcluded = function(dvi, maxIncomp = 2, pairings = NULL, ignoreSex = FALSE, 
   
   nRemov = sum(mat > maxIncomp, na.rm = TRUE)
   if(nRemov > 0) {
-    if(verbose)
-      message(sprintf("\nIn total %d pairings excluded", nRemov))
-    
     keepPairs = apply(mat[keepVics, , drop = FALSE], 1, function(rw)
       c("*", missing[!is.na(rw) & rw <= maxIncomp]), simplify = FALSE)
   } else {
-    if(verbose) message("No pairings excluded")
     keepPairs = pairings
   }
+  if(verbose)
+    cat(sprintf("Pairings excluded in total: %d\n", nRemov))
   
   dviRed$pairings = keepPairs
     
   # Return list -------------------------------------------------------------
 
   excluded = list(sample = excludedVics, missing = excludedMissing, fam = excludedFams)
-  report = list(PM = reportPM, AM = reportAM)
+  summary = list(PM = summaryPM, AM = summaryAM)
   
-  list(exclusionMatrix = mat, excluded = excluded, dviReduced = dviRed, report = report)
+  list(exclusionMatrix = mat, excluded = excluded, dviReduced = dviRed, 
+       summary = summary)
 }
 
 
 
-#' Find the number of incompatible markers for each
-#'
-#' This function computes the number of exclusions, i.e., the number of
-#' incompatible markers, for each pairwise comparison. By default, mutation
-#' models are ignored. The main work is done by [forrel::findExclusions()].
-#' 
-#' @param dvi A `dviData` object, typically created with [dviData()].
-#' @param removeMut A logical. If TRUE (default), all mutations models are
-#'   stripped.
-#'
-#' @return An integer matrix with `length(pm)` columns and `length(am)` rows.
-#'
-#' @examples
-#'
-#' # Plane crash example
-#' exclusionMatrix(planecrash)
-#'
-#' # Inspect a particular pair: M3 vs V6
-#' pm = planecrash$pm
-#' am = planecrash$am
-#' forrel::findExclusions(am, id = "M3", candidate = pm$V6)
-#'
-#' # Plot one of the incompatible markers
-#' plotDVI(planecrash, pm = 6, am = 3, marker ="D7S820")
-#'
+#' @rdname findExcluded
 #' @importFrom forrel findExclusions
 #' @export
-exclusionMatrix = function(dvi, removeMut = TRUE) {
+exclusionMatrix = function(dvi, pairings = NULL, ignoreSex = FALSE) {
   
   # Ensure proper dviData object
   dvi = consolidateDVI(dvi)
   
-  pm = dvi$pm
   am = dvi$am
   missing = dvi$missing
+  vics = names(dvi$pm)
   
-  npm = length(pm)
-  nmiss = length(missing)
-  
-  # Initialise matrix
-  mat = matrix(0L, nrow = npm, ncol = nmiss, dimnames = list(names(pm), missing))
+  # Pairings
+  if(!missing(pairings) || !missing(ignoreSex))
+    pairings = pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
+  else
+    pairings = dvi$pairings %||% generatePairings(dvi, ignoreSex = ignoreSex)
   
   # AM components (for use in output)
-  comp = getFamily(dvi, dvi$missing)
+  comp = getFamily(dvi, missing)
+  
+  # Initialise matrix
+  mat = matrix(NA_integer_, nrow = length(vics), ncol = length(missing), 
+               dimnames = list(vics, missing))
   
   # Loop through each pair of victim vs missing
-  for(i in 1:npm) for(j in 1:nmiss) {
-    vic = pm[[i]]
-    ref = am[[comp[j]]]
-    mat[i, j] = length(findExclusions(ref, id = missing[j], candidate = vic))
+  for(vic in vics) {
+    vicdata = dvi$pm[[vic]]
+    compatMiss = setdiff(pairings[[vic]], "*")
+    for(mis in compatMiss) {
+      ref = am[[comp[mis]]]
+      mat[vic, mis] = length(findExclusions(ref, id = mis, candidate = vicdata))
+    }
   }
   
   mat

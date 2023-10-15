@@ -5,13 +5,21 @@
 #' @param missing A character vector with names of missing persons.
 #' @param generatePairings A logical. If TRUE (default) a list of sex-compatible
 #'   pairings is included as part of the output.
+#' @param ignoreSex A logical.
+#' @param dvi A `dviData` object.
+#' @param pairings A list of pairings.
+#' @param errorIfEmpty A logical.
+#' @param verbose A logical.
 #'
 #' @return An object of class `dviData`, which is basically a list of `pm`,
 #'   `am`, `missing` and `pairings`.
 #'
 #' @examples
-#' dviData(pm = singleton("V1"), am = nuclearPed(1), missing = "3")
-#'
+#' dvi = dviData(pm = singleton("V1"), am = nuclearPed(1), missing = "3")
+#' dvi
+#' 
+#' checkDVI(dvi)
+#' 
 #' @export
 dviData = function(pm, am, missing, generatePairings = TRUE) {
   if(inherits(pm, "dviData"))
@@ -39,7 +47,7 @@ dviData = function(pm, am, missing, generatePairings = TRUE) {
   if(generatePairings) 
     dvi$pairings = generatePairings(dvi, ignoreSex = FALSE)
   
-  dvi
+  consolidateDVI(dvi)
 }
 
 
@@ -55,7 +63,7 @@ print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 10) {
   
   vics = names(pm)
   refs = if(nam) typedMembers(am) else NULL
-  amNames = names(am) %||% "(unnamed)"
+  amNames = names(am)
   
   # Number of victim males and females:
   nVfemales = length(females(pm))
@@ -69,31 +77,31 @@ print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 10) {
   nMarkersAM = if(nam) range(nMarkers(am, compwise = TRUE)) else 0
   
     
-  message(heading)
-  message(sprintf(" %d victims (%dM/%dF): %s", 
-                  length(pm), nVmales, nVfemales, trunc(vics, printMax))) 
-  message(sprintf(" %d missing (%dM/%dF): %s", 
-                  length(missing),  nMPsex[1], nMPsex[2], trunc(missing, printMax)))
-  message(sprintf(" %d typed refs: %s", length(refs), trunc(refs, printMax)))
-  message(sprintf(" %d ref famil%s: %s", 
-                  nam, ifelse(nam == 1, "y", "ies"), trunc(amNames, printMax)))
+  cat(heading, "\n")
+  cat(sprintf(" %d victim%s (%dM/%dF): %s\n", 
+              length(pm), if(length(pm) == 1) "" else "s", nVmales, nVfemales, trunc(vics, printMax)))
+  cat(sprintf(" %d missing (%dM/%dF): %s\n", 
+              length(missing), nMPsex[1], nMPsex[2], trunc(missing, printMax)))
+  cat(sprintf(" %d typed ref%s: %s\n", length(refs), if(length(refs) == 1) "" else "s", trunc(refs, printMax)))
+  cat(sprintf(" %d ref famil%s: %s\n", 
+              nam, ifelse(nam == 1, "y", "ies"), trunc(amNames, printMax)))
   
   ### Number of markers
   
   # Simple case: PM and AM equal, same number for all
   if(min(nMarkersPM, nMarkersAM) == max(nMarkersPM, nMarkersAM))
-    message("Number of markers, PM and AM: ", nMarkersPM[1]) 
+    cat("Number of markers, PM and AM:", nMarkersPM[1], "\n")
   else {
     if(nMarkersPM[1] == nMarkersPM[2])
-      message("Number of markers, PM: ", nMarkersPM[1])
+      cat("Number of markers, PM:", nMarkersPM[1], "\n")
     else 
-      message(sprintf("Number of markers, PM: Ranges from %d to %d", 
-                      nMarkersPM[1], nMarkersPM[2]))
+      cat(sprintf("Number of markers, PM: Ranges from %d to %d\n", 
+                  nMarkersPM[1], nMarkersPM[2]))
     if(nMarkersAM[1] == nMarkersAM[2])
-      message("Number of markers, AM: ", nMarkersAM[1])
+      cat("Number of markers, AM:", nMarkersAM[1], "\n")
     else 
-      message(sprintf("Number of markers, AM: Ranges from %d to %d", 
-                      nMarkersAM[1], nMarkersAM[2]))
+      cat(sprintf("Number of markers, AM: Ranges from %d to %d\n", 
+                  nMarkersAM[1], nMarkersAM[2]))
   }
 }
 
@@ -103,13 +111,8 @@ print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 10) {
 # Particularly important if the user has modified the `dvi` object.
 consolidateDVI = function(dvi) {
   
-  if(!inherits(dvi, "dviData")) {
-    # Convert to dviData if needed
-    if(setequal(setdiff(names(dvi), "pairings"), c("pm", "am", "missing")))
-      dvi = dviData(pm = dvi$pm, am = dvi$am, missing = dvi$missing)
-    else
-      stop2("Cannot consolidate `dviData`. Input has names ", names(dvi))
-  }
+  if(!inherits(dvi, "dviData"))
+    stop2("Cannot consolidate; input is not a `dviData` object")
   
   # Make sure pm is a list
   if(is.singleton(dvi$pm)) 
@@ -126,14 +129,21 @@ consolidateDVI = function(dvi) {
   if(is.ped(dvi$am))
     dvi$am = list(dvi$am)
   
+  # Enforce family names
+  if(is.null(names(dvi$am)))
+    names(dvi$am) = as.character(seq_along(dvi$am))
+  
   dvi
 }
 
 
 
-# @rdname jointDVI
-# @export
-checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, ignoreSex = FALSE){
+#' @rdname dviData
+#' @export
+checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, 
+                    ignoreSex = FALSE, verbose = TRUE){
+  if(verbose)
+    cat("Checking DVI dataset consistency\n")
   
   # Assumes `dvi` has been consolidated
   
@@ -149,7 +159,7 @@ checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, ignoreSex = FALS
   
   # Check that PM is a list of singletons
   if(!is.list(pm) || !all(vapply(pm, is.singleton, TRUE)))
-    stop2("`pm` object is not a list of singletons")
+    stop2("PM data is not a list of singletons")
   
   # Check that all missing are members of a ref pedigree
   comps = getComponent(am, missing, checkUnique = TRUE, errorIfUnknown = FALSE)
@@ -158,13 +168,31 @@ checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, ignoreSex = FALS
   
   unused = setdiff(seq_along(am), comps)
   if(length(unused))
-    warning("Some components of `am` have no missing individuals: ", toString(unused), 
+    warning("AM families with no missing individuals: ", toString(unused), 
             call. = FALSE, immediate. = TRUE)
   
-  if(is.null(pairings))
-    return(invisible())
+  # Check if marker sets are identical
+  markersAM = name(am)
+  markersPM = name(pm)
+  if(!setequal(markersAM, markersPM)) {
+    msg = "Warning: Unequal marker sets in PM and AM\n"
+    if(length(notinPM <- setdiff(markersAM, markersPM))) {
+      n1 = length(notinPM)
+      line1 = sprintf(" %d marker%s in AM but not in PM: %s\n", n1, if(n1 == 1) "" else "s", toString(notinPM))
+      msg = paste0(msg, line1)
+    }
+    if(length(notinAM <- setdiff(markersPM, markersAM))) {
+      n2 = length(notinAM)
+      line2 = sprintf(" %d marker%s in PM but not in AM: %s\n", n2, if(n2 == 1) "" else "s", toString(notinAM))
+      msg = paste0(msg, line2)
+    }
+    cat(msg)
+  }
+  
+  pairings = pairings %||% dvi$pairings
+  
   if(length(pairings) == 0)
-    stop2("Argument `pairings` has length 0")
+    return(invisible()) #stop2("Argument `pairings` has length 0")
   
   vics = names(pm)
   vicSex = getSex(pm, vics, named = TRUE)
@@ -173,7 +201,7 @@ checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, ignoreSex = FALS
   candidSex = getSex(am, candidMP, named = TRUE)
   
   if(!all(candidMP %in% missing))
-    stop2("Indicated pairing candidate is not a missing person: ", setdiff(candidMP, missing))
+    stop2("Pairing error: Candidate is not a missing person: ", setdiff(candidMP, missing))
   
   for(v in vics) {
     candid = pairings[[v]]
@@ -193,47 +221,9 @@ checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE, ignoreSex = FALS
         stop2("Candidate for victim ", v, " has wrong sex: ", cand[correctSex])
     }
   }
-}
-
-
-#' Summarise a DVI problem
-#'
-#' DEPRECATED: USE `print(dvi)` INSTEAD. Prints a summary of a given DVI problem, including the number of victims,
-#' missing persons, reference families and typed reference individuals. NOTE:
-#' 
-#' @param dvi A `dviData` object, typically created with [dviData()].
-#' @param method A character, used by other methods.
-#' @param printMax A positive integer. Vectors longer than this are truncated.
-#'
-#' @return No return value, called for side effects.
-#'
-#' @examples
-#' summariseDVI(planecrash)
-#' summariseDVI(planecrash, printMax = 5)
-#'
-#' @export
-summariseDVI = function(dvi, method = NULL, printMax = 10) {
   
-  cat("Note: `summariseDVI()` has been deprecated and merged with the print method for `dviData` objects.\n\n")
-  
-  # Ensure proper dviData object
-  dvi = consolidateDVI(dvi)
-  
-  pm = dvi$pm
-  am = dvi$am
-  missing = dvi$missing
-  
-  vics = names(pm)
-  refs = typedMembers(am)
-  nam = length(am)
-  
-  message("DVI problem:")
-  message(sprintf(" %d victims: %s", length(pm), trunc(vics, printMax)))
-  message(sprintf(" %d missing: %s", length(missing), trunc(missing, printMax)))
-  message(sprintf(" %d typed refs: %s", length(refs), trunc(refs, printMax)))
-  message(sprintf(" %d reference famil%s", nam, ifelse(nam == 1, "y", "ies")))
-  if(!is.null(method))
-    message("\n", method)
+  if(verbose)
+    cat("No problems found")
 }
 
 
@@ -252,9 +242,62 @@ summariseDVI = function(dvi, method = NULL, printMax = 10) {
 #' 
 #' @export
 getFamily = function(dvi, ids) {
+  if(!length(ids))
+    return(character(0))
+  
   comp = getComponent(dvi$am, ids, checkUnique = TRUE, errorIfUnknown = TRUE)
   if(!is.null(famnames <- names(dvi$am)))
     comp = famnames[comp]
   names(comp) = ids
   comp
+}
+
+
+#' Find the simple families of a DVI dataset
+#'
+#' Extract the names (if present) or indices of the *simple* reference families,
+#' i.e., the families containing exactly 1 missing person.
+#'
+#' @param dvi A `dviData` object.
+#'
+#' @return A character (if `dvi$am` has names) or integer vector.
+#' @seealso [getFamily()]
+#' 
+#' @examples
+#' # No simple families
+#' simple1 = getSimpleFams(example1)
+#' stopifnot(length(simple1) == 0)
+#' 
+#' # Second family is simple
+#' simple2 = getSimpleFams(example2)
+#' stopifnot(simple2 == 2)
+#' 
+#' # With family names
+#' simple3 = example2 |> relabelDVI(familyPrefix = "FAM") |> getSimpleFams()
+#' stopifnot(simple3 == "FAM2")
+#' 
+#' @export
+getSimpleFams = function(dvi) {
+  dvi = consolidateDVI(dvi)
+  
+  # AM component of each missing
+  fams = getFamily(dvi, ids = dvi$missing)
+  
+  # Number of missing in each
+  nMiss = table(fams)
+  
+  res = names(nMiss)[nMiss == 1]
+  
+  # Convert to integer if indices
+  if(is.integer(fams)) 
+    res = as.integer(res)
+  
+  res
+}
+
+dviEqual = function(dvi1, dvi2) {
+  identical(dvi1$pm, dvi2$pm) && 
+    identical(dvi1$am, dvi2$am) && 
+    identical(dvi1$missing, dvi2$missing) && 
+    identical(dvi1$pairings, dvi2$pairings)
 }

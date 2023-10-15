@@ -8,12 +8,12 @@
 #'
 #' @return NULL
 #' 
-#' @seealso [plotSolution()]
+#' @seealso [findUndisputed()], [plotSolution()]
 #' @examples
 #'
 #' # Example
-#' res = findUndisputed(example2, threshold = 2, relax = TRUE, verbose = FALSE)
-#' u = res$undisputed
+#' res = findUndisputed(example2, threshold = 2, verbose = FALSE)
+#' u = res$summary
 #' plotUndisputed(example2, u, marker = 1)
 #'
 #' @export
@@ -24,7 +24,7 @@ plotUndisputed = function(dvi, undisputed, ...){
     stop2("No undisputed to plot.")
   
   # Include only families with identification(s)
-  dvi = subsetDVI(dvi, am = unique(undisputed$Family))
+  dvi = subsetDVI(dvi, am = unique(undisputed$Family), verbose = FALSE)
   
   # Assignment as named vector (vic = miss)
   a = undisputed$Missing

@@ -1,14 +1,14 @@
 #' Undisputed identifications in a DVI problem
 #'
-#' This function uses the pairwise LR matrix to find "undisputed" matches
+#' This function uses the pairwise LR matrix to find *undisputed* matches
 #' between victims and missing individuals. An identification \eqn{V_i = M_j} is
-#' called undisputed if the corresponding likelihood ratio \eqn{LR_{i,j}}
-#' exceeds the given `threshold`, while all other pairwise LRs involving
-#' \eqn{V_i} or \eqn{M_j} are at most 1.
+#' called undisputed, relative to a threshold T, if the corresponding likelihood
+#' ratio \eqn{LR_{i,j} \geq T} AND \eqn{LR_{i,j}} is at least T times greater
+#' than all other pairwise LRs involving \eqn{V_i} or \eqn{M_j}.
 #'
-#' If the parameter `relax` is set to TRUE, the last criterion is relaxed,
-#' requiring instead that \eqn{LR_{i,j}} is at least `threshold` times greater
-#' than all other pairwise LRs involving \eqn{V_i} or \eqn{M_j}
+#' If the parameter `strict` is set to TRUE, the last criterion is replaced with
+#' the stronger requirement that all other pairwise LRs involving \eqn{V_i} or
+#' \eqn{M_j} must be at most 1.
 #'
 #' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param pairings A list of possible pairings for each victim. If NULL, all
@@ -16,8 +16,9 @@
 #' @param ignoreSex A logical.
 #' @param threshold A non-negative number. If no pairwise LR exceed this, the
 #'   iteration stops.
-#' @param relax A logical affecting the definition of being undisputed (see
+#' @param strict A logical affecting the definition of being undisputed (see
 #'   Details). Default: FALSE.
+#' @param relax Deprecated; use `strict = FALSE` instead.
 #' @param limit A positive number. Only pairwise LR values above this are
 #'   considered.
 #' @param nkeep An integer, or NULL. If given, only the `nkeep` most likely
@@ -32,36 +33,50 @@
 #'
 #' @return A list with the following entries:
 #'
-#'   * `undisputed`: A data frame containing the undisputed matches, including LR.
-#'
-#'   * `dviReduced`: A reduced version of `dvi`, where undisputed
+#'  * `dviReduced`: A reduced version of `dvi`, where undisputed
 #'   victims/missing persons are removed, and data from undisputed victims
-#'   inserted in `am`.
+#'   inserted into the reference data.
 #'
-#'   * `LRmatrix`, `LRlist`, `pairings`: Output from `pairwiseLR()` applied to
+#'  * `summary`: A data frame summarising the undisputed matches.
+#'
+#'  * `LRmatrix`: Output from `pairwiseLR()` applied to
 #'   the reduced problem.
 #'
 #' @examples
 #'
 #' \donttest{
-#' findUndisputed(planecrash, threshold = 1e4)
-#'
-#' # With `relax = TRUE`, one more identification is undisputed
-#' findUndisputed(planecrash, threshold = 1e4, relax = TRUE)
+#' u1 = findUndisputed(planecrash, verbose = FALSE)
+#' u1$summary 
+#' 
+#' # With `strict = TRUE`, the match M3 = V2 goes away
+#' u2 = findUndisputed(planecrash, strict = TRUE, verbose = FALSE)
+#' u2$summary
+#' 
+#' # Reason: M3 has LR > 1 also against V7
+#' u2$LRmatrix[, "M3"] |> round(2)
 #' }
 #'
 #' @export
-findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 10000, 
-                          relax = FALSE, limit = 0, nkeep = NULL, check = TRUE, 
-                          numCores = 1, verbose = TRUE) {
+findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, 
+                          threshold = 10000, strict = FALSE, relax = !strict, 
+                          limit = 0, nkeep = NULL, check = TRUE, numCores = 1, 
+                          verbose = TRUE) {
+  
+  if(!missing(relax)) {
+    cat("Warning: `relax` is deprecated; replaced by (its negation) `strict`")
+    strict = !relax
+  }
   
   if(verbose) {
-    message("\nFinding undisputed matches")
-    message("Pairwise LR threshold = ", threshold)
+    cat("\nFinding undisputed matches\n")
+    cat("Pairwise LR threshold =", threshold, "\n")
   }
 
   # Ensure proper dviData object
   dvi = consolidateDVI(dvi)
+  
+  if(!length(dvi$pm) || !length(dvi$missing))
+    return(list(dviReduced = dvi, summary = NULL))
   
   # AM components (for use in output)
   comp = getFamily(dvi, dvi$missing)
@@ -76,8 +91,10 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 1
   stp = 0
   while(TRUE) {
     
+    stp = stp + 1
+    
     if(verbose)
-      message("\nStep ", stp <- stp+1, ":")
+      cat(sprintf("\nStep %d:\n", stp))
     
     vics = names(dvi$pm)
     missing = dvi$missing
@@ -90,7 +107,7 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 1
     # Indices of matches exceeding threshold
     highIdx = which(B > threshold, arr.ind = TRUE)
     
-    if(!relax) { # undisputed = no others in row/column exceed 1
+    if(strict) { # undisputed = no others in row/column exceed 1
       goodRows = which(rowSums(B <= 1) == ncol(B) - 1)
       goodCols = which(colSums(B <= 1) == nrow(B) - 1)
       isUndisp = highIdx[, "row"] %in% goodRows & highIdx[, "col"] %in% goodCols
@@ -107,12 +124,12 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 1
     
     if(!Nundisp) {
       if(verbose)
-        message(sprintf("No%s undisputed matches", if(stp > 1) " further" else ""))
+        cat(sprintf("No%s undisputed matches\n", if(stp > 1) " further" else ""))
       break
     }
     
     if(verbose)
-      message(sprintf("%d undisputed %s", Nundisp, if(Nundisp == 1) "match" else "matches"))
+      cat(sprintf("%d undisputed match%s\n", Nundisp, if(Nundisp == 1) "" else "es"))
     
     undisp = highIdx[isUndisp, , drop = FALSE]
     
@@ -123,7 +140,7 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 1
       RES[[vic]] = list(Step = stp, Missing = missing[cl], LR = B[rw,cl])
       
       if(verbose)
-        message(sprintf(" %s = %s (LR = %.3g)", vic, missing[cl], B[rw,cl]))
+        cat(sprintf(" %s = %s (LR = %.3g)\n", vic, missing[cl], B[rw,cl]))
     }
     
     undispVics = vics[undisp[, 1]]
@@ -150,14 +167,18 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, threshold = 1
       break
   }
   
-  undispDF = do.call(rbind.data.frame, RES)
-  if(nrow(undispDF)) {
-    undispDF = cbind(undispDF, Sample = names(RES), Family = comp[undispDF$Missing])
-    undispDF = undispDF[c("Sample", "Missing", "Family", "LR", "Step")]
-    rownames(undispDF) = NULL
+  summary = do.call(rbind.data.frame, RES)
+  if(nrow(summary)) {
+    summary$Sample = names(RES)
+    summary$Family = comp[summary$Missing]
+    summary$Conclusion = "Undisputed"
+    summary$Comment = paste("step", summary$Step)
+    summary = summary[c("Family", "Missing", "Sample", "LR", "Conclusion", "Comment")]
+    rownames(summary) = NULL
   }
   
-  # Disputed: TODO!
+  # Update pairings using output from the last pairwiseLR
+  dvi$pairings = ss$pairings
   
-  c(list(undisputed = undispDF, dviReduced = dvi), ss)
+  list(dviReduced = dvi, summary = summary, LRmatrix = B)
 }

@@ -38,14 +38,14 @@ pairwiseLR = function(dvi, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep 
                     check = TRUE, numCores = 1, verbose = FALSE){
   
   if(verbose)
-    message("Computing matrix of pairwise LR")
+    cat("Computing matrix of pairwise LR\n")
   
   # Ensure proper dviData object
   dvi = consolidateDVI(dvi)
   
   # Check consistency
   if(check)
-    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex)
+    checkDVI(dvi, pairings = pairings, ignoreSex = ignoreSex, verbose = verbose)
   
   pm = dvi$pm
   am = dvi$am
@@ -78,7 +78,7 @@ pairwiseLR = function(dvi, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep 
   if(numCores > 1) {
     
     if(verbose) 
-      message("Using ", numCores, " cores")
+      cat("Using", numCores, "cores\n")
     
     cl = makeCluster(numCores)
     on.exit(stopCluster(cl))
@@ -109,7 +109,7 @@ pairwiseLR = function(dvi, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep 
   }
   
   # Reduce pairings according to `limit` and/or nkeep
-  pairings.reduced = lapply(LRlist, function(lrs) {
+  pairingsReduced = lapply(LRlist, function(lrs) {
     if(limit == 0) 
       keepIdx = lrs > 0
     else
@@ -130,7 +130,7 @@ pairwiseLR = function(dvi, pairings = NULL, ignoreSex = FALSE, limit = 0, nkeep 
     newpairings
   })
   
-  list(LRmatrix = LRmatrix, LRlist = LRlist, pairings = pairings.reduced)
+  list(LRmatrix = LRmatrix, LRlist = LRlist, pairings = pairingsReduced)
 }
 
 
