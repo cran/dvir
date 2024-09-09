@@ -41,7 +41,7 @@ following meanings (see Examples):
 \item{othersPrefix}{Prefix used to label other untyped individuals. Use ""
 for numeric labels ( 1, 2, ...).}
 
-\item{verbose}{A logical. Passed on to \code{\link[=readFam]{readFam()}}.}
+\item{verbose}{A logical, passed on to \code{readFam()}.}
 
 \item{missingIdentifier}{A character of length 1 used to identify missing
 persons in the Familias file. The default chooses everyone whose label
@@ -51,8 +51,8 @@ begins with "Missing".}
 A \code{dviData} object.
 }
 \description{
-This is a wrapper for \code{\link[=readFam]{readFam()}} that reads Familias files with DVI
-information.
+This is a wrapper for \code{\link[pedFamilias:readFam]{pedFamilias::readFam()}} that reads Familias files with
+DVI information.
 }
 \details{
 The sex of the missing persons need to be checked as this
@@ -72,8 +72,7 @@ z = familias2dvir(file, missingFormat = "M[FAM]-[IDX]",
                    refPrefix = "ref", othersPrefix = "E")
 plotDVI(z)
 
-
 }
 \seealso{
-\code{\link[=jointDVI]{jointDVI()}}, \code{\link[=dviData]{dviData()}}, \code{\link[=relabelDVI]{relabelDVI()}}
+\code{\link[=dviData]{dviData()}}, \code{\link[=relabelDVI]{relabelDVI()}}
 }

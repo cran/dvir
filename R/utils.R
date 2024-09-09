@@ -1,7 +1,7 @@
 
 #' @importFrom pedprobr likelihood
 loglikTotal = function(x, markers = seq_len(nMarkers(x))) {
-  sum(likelihood(x, marker = markers, logbase = exp(1), eliminate = 1))
+  sum(likelihood(x, marker = markers, logbase = exp(1)))
 }
 
 
@@ -16,6 +16,24 @@ stop2 = function(...) {
 `%||%` = function(x, y) {
   if(is.null(x)) y else x
 }
+
+ftime = function(st, digits = 3) {
+  format(Sys.time() - st, digits = digits)
+}
+
+# Fast intersection. NB: assumes no duplicates!
+.myintersect = function (x, y) {
+  y[match(x, y, 0L)]
+}
+
+.mysetdiff = function(x, y) {
+  unique.default(x[match(x, y, 0L) == 0L])
+}
+
+pluralise = function(noun, n) {
+  if(n == 1) noun else sprintf("%ss", noun)
+}
+
 
 trunc = function(x, printMax = 10) {
   if(length(x) <= printMax)
@@ -54,62 +72,30 @@ sprintfNamed = function(fmt, ...) {
   do.call(sprintf, append(arglist, fmt, 0))
 }
 
-#' Combine summary tables
-#'
-#' Combines summary tables from various functions into a final result table.
-#'
-#' @param dfs A list of data frames.
-#' @param orderBy A character with column names to sort by.
-#' @param dvi A `dviData` object used for sorting. Note that if given, this must
-#'   contain all victims and families.
-#'
-#' @return A data frame.
-#'
-#' @examples
-#' u = findUndisputed(planecrash)
-#' a = amDrivenDVI(u$dviReduced, threshold2 = 500)
-#'
-#' u$summary
-#' a$summary
-#'
-#' combineSummaries(list(u$summary, a$summary),
-#'                  orderBy = c("Family", "Missing"),
-#'                  dvi = planecrash)
-#' @export
-combineSummaries = function(dfs, orderBy = NULL, dvi = NULL) {
-  allCols = c("Family", "Missing", "Sample","LR", "Conclusion", "Comment")
-  #unique(unlist(lapply(dfs, names)))
+# Undisputed entries in a LR/GLR matrix
+undisputedEntries = function(M, threshold = 1, strict = TRUE) {
   
-  # Harmonize data frames to have all columns
-  dfsExt = lapply(dfs, function(df) {
-    if(is.null(df) || nrow(df) == 0) 
-      return(NULL)
-    
-    # Missing columns
-    miscol = setdiff(allCols, names(df))
-    for(cc in miscol)
-      df[[cc]] = NA
-    
-    df[allCols]
-  })
+  # Indices of matches exceeding threshold
+  highIdx = which(M > threshold, arr.ind = TRUE)
   
-  final = do.call(rbind, dfsExt)
-  if(is.null(orderBy))
-    return(final)
+  # Return if empty
+  if(!nrow(highIdx)) 
+    return(highIdx)
   
-  if(is.null(dvi)) {
-    final = final[do.call(order, final[orderBy]), , drop = FALSE]
-    return(final)
+  # Identify which rows of `highIdx` to keep
+  if(strict) { # undisputed = no others in same row or column exceed 1
+    goodRows = which(rowSums(M <= 1) == ncol(M) - 1)
+    goodCols = which(colSums(M <= 1) == nrow(M) - 1)
+    isUndisp = highIdx[, "row"] %in% goodRows & highIdx[, "col"] %in% goodCols
   }
-  
-  # Use ordering in provided DVI object
-  ordvec = lapply(orderBy, function(cc) switch(cc,
-    Family = match(final$Family, names(dvi$am)),
-    Missing = match(final$Missing, dvi$missing),
-    Sample = match(final$Sample, names(dvi$pm)),
-    stop2("Column does not exist: ", cc)))
-  
-  final = final[do.call(order, ordvec), , drop = FALSE]
-  rownames(final) = NULL
-  final
+  else { # undisputed = no others in same row or column exceed LR/threshold
+    isUndisp = sapply(seq_len(nrow(highIdx)), function(k) {  # safer than apply(.., 1)!
+      rw = highIdx[k,1]
+      cl = highIdx[k,2]
+      all(c(M[rw, -cl], M[-rw, cl]) <= M[rw, cl]/threshold)
+    })
+  }
+
+  # Return matrix of indices of undisputed matches   
+  highIdx[isUndisp, , drop = FALSE]
 }

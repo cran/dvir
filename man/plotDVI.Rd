@@ -8,12 +8,20 @@ plotDVI(
   dvi,
   pm = TRUE,
   am = TRUE,
+  style = 1,
+  famnames = NA,
   hatched = typedMembers,
-  col = list(red = dvi$missing),
   frames = TRUE,
   titles = c("PM", "AM"),
+  cex = NA,
+  col = 1,
+  lwd = 1,
+  fill = NA,
+  carrier = NULL,
   widths = NULL,
+  heights = NULL,
   nrowPM = NA,
+  nrowAM = NA,
   dev.height = NULL,
   dev.width = NULL,
   newdev = !is.null(c(dev.height, dev.width)),
@@ -31,19 +39,26 @@ samples. Default: TRUE.}
 plotted, or a vector of indices selecting a subset of the families.
 Default: TRUE.}
 
+\item{style}{An integer (currently 1 or 2) indicating the style of the plot.}
+
+\item{famnames}{A logical. If NA (default) family names are included if there
+are multiple families.}
+
 \item{hatched}{A character vector of ID labels, or the name of a function. By
 default, typed individuals are hatched.}
-
-\item{col}{A list of colour vectors (see \code{\link[pedtools:plot.ped]{pedtools::plot.ped()}}). By default,
-missing members of \code{dvi$am} are shown in red.}
 
 \item{frames}{A logical, by default TRUE.}
 
 \item{titles}{A character of length 2.}
 
-\item{widths}{A numeric with relative plot widths.}
+\item{fill, cex, col, lwd, carrier}{Arguments passed on to \code{\link[pedtools:plot.ped]{pedtools::plot.ped()}}.}
+
+\item{widths, heights}{Numeric with relative columns widths / row heights, to
+be passed on to \code{layout()}.}
 
 \item{nrowPM}{The number of rows in the array of PM singletons.}
+
+\item{nrowAM}{The number of rows in the array of AM families.}
 
 \item{dev.height, dev.width}{Plot height and widths in inches. These are
 optional, and only relevant if \code{newdev = TRUE}.}
@@ -61,7 +76,7 @@ Plot a DVI problem
 plotDVI(example2)
 
 # Override default layout of PM singletons
-plotDVI(example2, nrowPM = 3)
+plotDVI(example2, nrowPM = 1)
 
 # Subset
 plotDVI(example2, pm = 1:2, am = 1, titles = c("PM (1-2)", "AM (1)"))
@@ -69,7 +84,8 @@ plotDVI(example2, pm = 1:2, am = 1, titles = c("PM (1-2)", "AM (1)"))
 # AM only
 plotDVI(example2, pm = FALSE, titles = "AM families")
 
-# Further options
-# plotDVI(example2, new = T, frames = FALSE, marker = 1, cex = 1.2, nrowPM = 1)
+# Further plot options
+plotDVI(example2, frames = FALSE, marker = 1, cex = 1.2, nrowPM = 3, nrowAM = 2,
+  textAnnot = list(inside = list(c(M1 = "?", M2 = "?", M3 = "?"), cex = 1.5)))
 
 }
