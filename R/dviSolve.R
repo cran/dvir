@@ -1,7 +1,29 @@
-#' A complete pipeline for solving a DVI case
+#' A complete workflow for solving a DVI case
 #'
-#' This wraps several other functions into a complete pipeline for solving a DVI
-#' case.
+#' Wraps the main`dvir` workflow for DVI analysis and identification of likely AM--PM matches.
+#'
+#' The function roughly implements the following workflow:
+#'
+#' - **Preparation and QC**
+#'   - Consolidate data and validate input: [checkDVI()]
+#'   - Generate pairings: [generatePairings()]
+#'   
+#' - **Initial reduction**
+#'   - Detect and remove nonidentifiable missing persons: [findNonidentifiable()]
+#'   
+#' - **Iterative reduction** (repeat until stable)
+#'   - Excluded individuals and pairings: [findExcluded()]
+#'   - Undisputed matches from pairwise LRs: [findUndisputed()]
+#'   
+#' - **AM-driven analysis**: [amDrivenDVI()]
+#'   - Simple families (1 missing): Summarise conflicting results
+#'   - Complex families (>1 missing): Joint analysis + GLR
+#'
+#' - **PM-driven analysis**
+#'   - Summarise remaining victim samples.
+#'   
+#' - **Output**
+#'   - Format AM and PM summaries: [formatSummary()]
 #'
 #' @param dvi A `dviData` object.
 #' @param threshold LR threshold for 'significant' match.
@@ -12,17 +34,23 @@
 #' @param ignoreSex A logical, by default FALSE.
 #' @param limit	A number passed onto [findUndisputed()]; only pairwise LR values
 #'   above this are considered.
+#' @param detailedOutput A logical, by default FALSE. See Details.
 #' @param verbose,debug Logicals.
 #'
-#' @return A data frame.
-#'
+#' @return A list of data frames `AM` and `PM`. 
+#' 
+#' If `detailedOutput = TRUE`, the result also includes the exclusion matrix 
+#' from the first call to `findExcluded()` and the LR matrix from the first 
+#' call to `findUndisputed()`.
+#' 
 #' @examples
 #' dviSolve(example2)
-#' dviSolve(example2, threshold = 5, verbose = FALSE)
+#' dviSolve(example2, threshold = 5, detailedOutput = TRUE, verbose = FALSE)
 #'
 #' @export
-dviSolve = function(dvi, threshold = 1e4, threshold2 = max(1, threshold/10), maxIncomp = 2, 
-                    ignoreSex = FALSE, limit = 0, verbose = TRUE, debug = FALSE) {
+dviSolve = function(dvi, threshold = 1e4, threshold2 = max(1, threshold/10), 
+                    maxIncomp = 2, ignoreSex = FALSE, limit = 0, 
+                    detailedOutput = FALSE, verbose = TRUE, debug = FALSE) {
 
   if(ignoreSex)
     dvi$pairings = generatePairings(dvi, ignoreSex = TRUE)
@@ -45,15 +73,15 @@ dviSolve = function(dvi, threshold = 1e4, threshold2 = max(1, threshold/10), max
   
   non = findNonidentifiable(dvi)
   dvi = non$dviReduced
-  summ = non$summary
-  summariesAM = c(summariesAM, list(summ))
+  summariesAM = c(summariesAM, list(non$summary))
   if(verbose)
-    if(!is.null(summ)) print(summ) else cat("None\n")
+    printSummary(non$summary, nulltext = "None")
   
   iter = 0
 
   # Loop until no change: excl, undisp, excl, ...
   while(TRUE) {
+    
     iter = iter + 1
     
     # Exclusions --------------------------------------------------------------
@@ -62,106 +90,185 @@ dviSolve = function(dvi, threshold = 1e4, threshold2 = max(1, threshold/10), max
       cat("Exclusions, iteration" |> paste(iter) |> dashpad())
     
     excl = findExcluded(dvi, maxIncomp = maxIncomp, verbose = debug)
+
+    # Store first exclusion matrix
+    if(iter == 1)
+      EXCLmat1 = excl$exclusionMatrix
+    
+    # Break loop if no change - but not in first iter!
     if(dviEqual(excl$dviReduced, dvi)) {
-      if(verbose) cat("No change; breaking loop\n")
-      break
+      if(verbose) cat("No exclusions", if(iter > 1) "; breaking loop", "\n", sep = "")
+      if(iter > 1)
+        break
     }
     else {
-      dvi = excl$dviReduced
-      summ = excl$summary
-      summariesAM = c(summariesAM, list(summ$AM))
-      summariesPM = c(summariesPM, list(summ$PM))
-      nRemov = sum(excl$exclusionMatrix > maxIncomp, na.rm = TRUE)
+      s = excl$summary
+      summariesAM = c(summariesAM, list(s$AM))
+      summariesPM = c(summariesPM, list(s$PM))
       if(verbose) {
-        if(!is.null(summ)) {print(summ); cat("\n")}
-        cat(sprintf("Removed %d candidate pairings\n", nRemov))
+        removedPrs = removedPairings(excl$dviReduced, dvi)
+        printSummary(s, addNewline = removedPrs > 0)
+        
+        if(removedPrs)
+          cat(sprintf("Excluded %s\n", pluralise("individual pairing", removedPrs)))
       }
+      dvi = excl$dviReduced
     }
+    
+    # Undisputed --------------------------------------------------------------
     
     if(verbose)
       cat("Undisputed, iteration" |> paste(iter) |> dashpad())
     
+    und = findUndisputed(dvi, threshold = threshold, limit = limit, 
+                         keepLRmatrs = (iter == 1), verbose = debug)
 
-    # Undisputed --------------------------------------------------------------
+    # Store first LR matrix
+    if(iter == 1) {
+      LRmat1 = und$LRmatrix[[1]]
+      LRmat = und$LRmatrix[[length(und$LRmatrix)]]
+    }
+    else 
+      LRmat = und$LRmatrix
     
-    und = findUndisputed(dvi, threshold = threshold, limit = limit, verbose = debug)
     if(dviEqual(und$dviReduced, dvi)) {
       if(verbose) cat("No change; breaking loop\n")
       break
     }
     else {
+      s = und$summary
+      summariesAM = c(summariesAM, list(s))
+      summariesPM = c(summariesPM, list(s))
+      if(verbose) {
+        removedPrs = removedPairings(und$dviReduced, dvi)
+        printSummary(s, addNewline = removedPrs > 0)
+        if(removedPrs) {
+          a = pluralise("pairing", removedPrs)
+          if(limit == 0) 
+            cat(sprintf("Removed %s with LR = 0\n", a))
+          else 
+            cat(sprintf("Removed %s with LR < %g (`limit`)\n", a, limit))
+        }
+      }
       dvi = und$dviReduced
-      summ = und$summary
-      summariesAM = c(summariesAM, list(summ))
-      summariesPM = c(summariesPM, list(summ))
-      if(verbose)
-        print(summ)
     }
   }
 
-  # AM-driven ---------------------------------------------------------------
-
+  # AM-driven: Simple-----------------------------------------------------------
+  
   nam = length(dvi$am)
+  nMiss = nMissFam(dvi)
+  simpleFams = names(nMiss[nMiss == 1])
+  nsimp = length(simpleFams)
+  
   if(verbose) {
-    cat("AM-driven analysis" |> dashpad())
-    if(nam == 0) cat("0 remaining families\n")
-    else if(nam == 1) cat("1 remaining family:", names(dvi$am), "\n\n")
-    else cat(sprintf("%d remaining families: %s\n\n", nam, toString(names(dvi$am))))
+    cat("AM-driven analysis: Simple families" |> dashpad())
+    if(nsimp == 0)
+      cat("0 simple families\n")
+    else
+      cat(sprintf("%d simple famil%s: %s\n\n", nsimp, ifelse(nsimp == 1, "y", "ies"), toString(simpleFams)))
   }
   
-  if(nam >= 1) { 
-    amd = amDrivenDVI(dvi, threshold = threshold, threshold2 = threshold2, 
-                      verbose = debug)
-    
-    dvi = amd$dviReduced
-    summariesAM = c(summariesAM, list(amd$summary$AM))
-    summariesPM = c(summariesPM, list(amd$summary$PM))
-    if(verbose && !is.null(amd$summary$AM))
-      print(amd$summary$AM)
-  }
-
-  # Remaining: Inconclusive -------------------------------------------------
-
-  if(verbose)
-    cat("Remaining MPs" |> dashpad())
-    
-  if(length(miss <- dvi$missing)) {
-    summAM = data.frame(Family = getFamily(dvi, miss),
-                        Missing = miss,
-                        Conclusion = "Inconclusive GLR", 
-                        row.names = NULL)
-    summariesAM = c(summariesAM, list(summAM))
+  for(fam in simpleFams) {
+    dvi1 = subsetDVI(dvi, am = fam, verbose = FALSE)
     if(verbose)
-      print(summAM)
+      cat(sprintf("Family %s: %s", fam, dvi1$missing))
+    s = .simpleFamDVI(dvi1, threshold = threshold2, LRmatrix = LRmat)
+    summariesAM = c(summariesAM, list(s))
+    if(verbose)
+      cat(" -->", s$Conclusion, "\n")
   }
-  else if(verbose) 
-    cat("None\n")
+  
+  # AM-driven: Complex-----------------------------------------------------------
+  
+  complexFams = names(nMiss[nMiss > 1])
+  ncomp = length(complexFams)
+  
+  if(verbose) {
+    cat("AM-driven analysis: Complex families" |> dashpad())
+    if(ncomp == 0)
+      cat("0 complex families\n")
+    else
+      cat(sprintf("%d complex famil%s: %s\n\n", ncomp, 
+                  ifelse(ncomp == 1, "y", "ies"), toString(complexFams)))
+  }
+
+  # Loop through families; remove identified victims in each iteration
+  for(fam in complexFams) {
+    dvi1 = subsetDVI(dvi, am = fam, verbose = FALSE)
+    if(verbose)
+      cat(sprintf("Family %s: %s", fam, toString(dvi1$missing)))
+    s = .complexFamDVI(dvi1, threshold = threshold, LRmatrix = LRmat, verbose = FALSE)
+    summariesAM = c(summariesAM, list(s$AM))
+    summariesPM = c(summariesPM, list(s$PM))
+
+    # Reduce main DVI dataset
+    dvi = subsetDVI(dvi, 
+                    am = .mysetdiff(names(dvi$am), fam),
+                    pm = .mysetdiff(names(dvi$pm), s$PM$Sample), 
+                    removeUnpairedPM = FALSE, verbose = FALSE)
+    if(verbose) {
+      concs = s$AM$Conclusion
+      if(all(concs == concs[1])) concs = concs[1]
+      cat(" -->", toString(concs), "\n")
+
+    }
+  }
+  
+  # PM driven analysis----------------------------------------------------------
   
   if(verbose)
     cat("Remaining victim samples" |> dashpad())
-   
-  if(length(dvi$pm)) {
-   
-    summPM = data.frame(Sample = names(dvi$pm),
-                        Conclusion = "Inconclusive",
-                        row.names = NULL)
-    summariesPM = c(summariesPM, list(summPM))
-    if(verbose)
-      print(summPM)
-  }
-  else if (verbose)
-    cat("None\n")
   
-  # Return final summaries ----------------------------------------------------
+  vics = names(dvi$pm)
+  nv = length(vics)
+  if(verbose) {
+    if(nv == 0) cat("No remaining victims\n")
+    else cat(sprintf("%d remaining victim%s: %s\n", nv, if(nv == 1) "" else "s", toString(vics)))
+  }
 
+  if(nv > 0) {
+    s = .pmDrivenDVI(dvi, threshold2 = threshold2, LRmatrix = LRmat, origdvi = origdvi)
+    summariesPM = c(summariesPM, list(s))
+  }
+
+  # Collect results
   resultAM = formatSummary(summariesAM, orientation = "AM", dvi = origdvi)
   resultPM = formatSummary(summariesPM, orientation = "PM", dvi = origdvi)
-  list(AM = resultAM, PM = resultPM)
+
+  res = list(AM = resultAM, PM = resultPM)
+  if(detailedOutput) {
+    res$LRmatrix = LRmat1
+    res$exclusionMatrix = EXCLmat1
+  }
+  
+  res
 }
 
 
 
 dashpad = function(x, width = 50) {
   y = paste0("\n", strrep("-", 6), " ", x, " ")
-  paste0(y, strrep("-", width - nchar(y)), "\n\n")
+  paste0(y, strrep("-", max(0, width - nchar(y))), "\n\n")
+}
+
+printSummary = function(s, nulltext = NULL, addNewline = FALSE) {
+  if(is.null(s) || (length(s) == 2 && is.null(s$AM) && is.null(s$PM))) {
+    if(!is.null(nulltext))
+      cat(nulltext, "\n")
+    return()
+  }
+  if(is.data.frame(s)) {
+    print(s)
+    return(invisible())
+  }
+  
+  if(!is.null(s$AM)) {
+    cat("$AM\n"); print(s$AM)
+  }
+  if(!is.null(s$PM)) {
+    cat("$PM\n"); print(s$PM)
+  }
+  if(addNewline)
+    cat("\n")
 }

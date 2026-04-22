@@ -1,3 +1,30 @@
+# dvir 3.4.0
+
+## New features
+* New function `addVictims()` for adding new victim samples to a DVI dataset.
+* New function `getDatabase()` for extracting the marker database attached to a DVI dataset.
+* Further refinements of the `dviSolve()` workflow.
+* The documentation of `dviSolve()` now includes a detailed outline of the workflow.
+
+## Other
+* Harmonise markers in `consolidateDVI()`.
+* Improve the algorithm for finding nonidentifiable individuals.
+* Improve `print.dviData()`.
+* Document `plotDVI()` option `ncolAM`.
+* `jointDVI()` now shows a legacy message.
+* Added column `LR0` in output of `jointDVI()` (work in progress).
+* `dviSolve()` gains argument `detailedOutput` (mainly for internal use).
+* `findUndisputed()` gains argument `keepLRmatrs` (mainly for internal use).
+* Update and rename several example datasets from the KETP book.
+
+## Bug fixes
+* More graceful handling of `dviData` objects with empty components.
+* Handle duplicated reference individuals in `familias2dvir()`.
+* Skip families with no missing persons.
+* Handle victims with no remaining pairings.
+* `findUndisputed()` no longer skips the first iteration.
+* Fix a printing error for `dviData` objects with zero AM or PM individuals.
+
 # dvir 3.3.0
 
 ## New features

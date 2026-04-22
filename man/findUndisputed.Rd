@@ -14,6 +14,7 @@ findUndisputed(
   limit = 0,
   nkeep = NULL,
   numCores = 1,
+  keepLRmatrs = FALSE,
   verbose = TRUE
 )
 }
@@ -41,6 +42,8 @@ pairings are kept for each victim.}
 
 \item{numCores}{An integer; the number of cores used in parallelisation.
 Default: 1.}
+
+\item{keepLRmatrs}{A logical; for internal purposes. Default: FALSE.}
 
 \item{verbose}{A logical. Default: TRUE.}
 }

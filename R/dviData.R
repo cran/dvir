@@ -26,17 +26,23 @@ dviData = function(pm, am, missing, generatePairings = TRUE) {
     return(pm)
   
   # Enforce lists
-  if(is.singleton(pm)) 
+  if(is.null(pm))
+    pm = list()
+  else if(is.singleton(pm)) 
     pm = list(pm)
    
   # Ensure `pm` is named
-  names(pm) = unlist(labels(pm))
+  if(length(pm))
+    names(pm) = unlist(labels(pm))
+  
+  if(is.null(am))
+    am = list()
   
   if(!(length(am) == 0 || is.ped(am) || is.pedList(am)))
     stop2("Argument `am` must be a `ped` object or a list of such")
   
   if(is.null(missing))
-    stop2("Argument `missing` cannot be NULL")
+    missing = character()
   
   if(!all(missing %in% unlist(labels(am))))
     stop2("Missing person not found in AM data: ", setdiff(missing, unlist(labels(am))))
@@ -54,7 +60,7 @@ dviData = function(pm, am, missing, generatePairings = TRUE) {
 
 
 #' @export
-print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 10) {
+print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 8) {
   
   dvi = x
   pm = dvi$pm
@@ -76,35 +82,47 @@ print.dviData = function(x, ..., heading = "DVI dataset:", printMax = 10) {
   nMPsex = tabulate(getSex(x$am, missing), nbins = 2)
   
   # Need to know later if there are no, equal (>0) or different number of markers
-  nMarkersPM = if(npm) range(nMarkers(pm, compwise = TRUE)) else 0
-  nMarkersAM = if(nam) range(nMarkers(am, compwise = TRUE)) else 0
+  rangePM = if(npm) range(nMarkers(pm, compwise = TRUE)) else c(0,0)
+  rangeAM = if(nam) range(nMarkers(am, compwise = TRUE)) else c(0,0)
   
     
   cat(heading, "\n")
-  cat(sprintf(" %d victim%s (%dM/%dF): %s\n", 
-              length(pm), if(length(pm) == 1) "" else "s", nVmales, nVfemales, trunc(vics, printMax)))
-  cat(sprintf(" %d missing (%dM/%dF): %s\n", 
-              length(missing), nMPsex[1], nMPsex[2], trunc(missing, printMax)))
-  cat(sprintf(" %d typed ref%s: %s\n", length(refs), if(length(refs) == 1) "" else "s", trunc(refs, printMax)))
-  cat(sprintf(" %d ref famil%s: %s\n", 
-              nam, ifelse(nam == 1, "y", "ies"), trunc(amNames, printMax)))
+  
+  if(printMax == 0) {
+    cat(sprintf(" %d victim%s (%dM/%dF)\n", length(pm), if(length(pm) == 1) "" else "s", nVmales, nVfemales))
+    cat(sprintf(" %d missing (%dM/%dF)\n", length(missing), nMPsex[1], nMPsex[2]))
+    cat(sprintf(" %d reference individual%s\n", length(refs), if(length(refs) == 1) "" else "s"))
+    cat(sprintf(" %d pedigree%s\n", nam, if(nam == 1) "" else "s"))  
+  }
+  else {
+    cat(sprintf(" %d victim%s (%dM/%dF): %s\n", 
+                length(pm), if(length(pm) == 1) "" else "s", nVmales, nVfemales, trunc(vics, printMax)))
+    cat(sprintf(" %d missing (%dM/%dF): %s\n", 
+                length(missing), nMPsex[1], nMPsex[2], trunc(missing, printMax)))
+    cat(sprintf(" %d reference individual%s: %s\n", length(refs), if(length(refs) == 1) "" else "s", trunc(refs, printMax)))
+    cat(sprintf(" %d pedigree%s: %s\n", nam, if(nam == 1) "" else "s", trunc(amNames, printMax)))
+  }
   
   ### Number of markers
   
   # Simple case: PM and AM equal, same number for all
-  if(min(nMarkersPM, nMarkersAM) == max(nMarkersPM, nMarkersAM))
-    cat("Number of markers, PM and AM:", nMarkersPM[1], "\n")
+  if(min(rangePM, rangeAM) == max(rangePM, rangeAM))
+    cat("Markers:", rangePM[1], "\n")
   else {
-    if(nMarkersPM[1] == nMarkersPM[2])
-      cat("Number of markers, PM:", nMarkersPM[1], "\n")
-    else 
-      cat(sprintf("Number of markers, PM: Ranges from %d to %d\n", 
-                  nMarkersPM[1], nMarkersPM[2]))
-    if(nMarkersAM[1] == nMarkersAM[2])
-      cat("Number of markers, AM:", nMarkersAM[1], "\n")
-    else 
-      cat(sprintf("Number of markers, AM: Ranges from %d to %d\n", 
-                  nMarkersAM[1], nMarkersAM[2]))
+    if(npm > 0) {
+      if(rangePM[1] == rangePM[2])
+        cat("Markers (PM):", rangePM[1], "\n")
+      else 
+        cat(sprintf("Markers (PM): Ranges from %d to %d\n", 
+                    rangePM[1], rangePM[2]))
+    }
+    if(nam > 0) {
+      if(rangeAM[1] == rangeAM[2])
+        cat("Markers (AM):", rangeAM[1], "\n")
+      else 
+        cat(sprintf("Markers (AM): Ranges from %d to %d\n", 
+                    rangeAM[1], rangeAM[2]))
+    }
   }
 }
 
@@ -118,7 +136,7 @@ consolidateDVI = function(dvi, dedup = FALSE) {
     stop2("Cannot consolidate; input is not a `dviData` object")
   
   # Make sure pm is a list
-  if(is.singleton(dvi$pm)) 
+  if(is.ped(dvi$pm))   # include non-singletons, so that they can be caught below
     dvi$pm = list(dvi$pm)
   
   # Ensure `pm` is correctly named
@@ -133,9 +151,13 @@ consolidateDVI = function(dvi, dedup = FALSE) {
     dvi$am = list(dvi$am)
   
   # Enforce family names if not present (F1, F2, ...)
-  if(is.null(names(dvi$am)))
+  if(is.null(names(dvi$am)) && length(dvi$am))
     names(dvi$am) = paste0("F", seq_along(dvi$am))
 
+  # Ensure all comps have the same markers in the same order
+  dvi$pm = harmoniseMarkers(dvi$pm)
+  dvi$am = harmoniseMarkers(dvi$am)
+  
   # Ensure `missing` is an unnamed character
   dvi$missing = as.character(dvi$missing)
   
@@ -245,21 +267,25 @@ checkDVI = function(dvi, pairings = NULL, errorIfEmpty = FALSE,
 #' @param dvi A [dviData()] object.
 #' @param ids A vector of ID labels of members of `dvi$am`.
 #'
-#' @return A vector of the same length as `ids`, containing the family names (if
-#'   `dvi$am` is named) or component indices (otherwise) of the `ids`
-#'   individuals.
+#' @return A vector of the same length as `ids`, containing the family names of
+#'   the `ids` individuals.
 #'
 #' @examples
 #' getFamily(example2, ids = example2$missing)
-#' 
+#'
 #' @export
 getFamily = function(dvi, ids) {
   if(!length(ids))
     return(character(0))
   
+  dvi = consolidateDVI(dvi)
+  
+  famnames = names(dvi$am)
+  if(is.null(famnames))
+    stop2("AM data has no family names")
+  
   comp = getComponent(dvi$am, ids, checkUnique = TRUE, errorIfUnknown = TRUE)
-  if(!is.null(famnames <- names(dvi$am)))
-    comp = famnames[comp]
+  comp = famnames[comp]
   names(comp) = ids
   comp
 }
@@ -287,14 +313,15 @@ getFamily = function(dvi, ids) {
 #' @export
 getSimpleFams = function(dvi) {
   dvi = consolidateDVI(dvi)
+  famnames = names(dvi$am)
   
   # AM component of each missing
   fams = getFamily(dvi, ids = dvi$missing)
   
-  # Number of missing in each
-  nMiss = table(fams)
-  
-  res = names(nMiss)[nMiss == 1]
+  # Number of missing in each (better than `table`)
+  nMiss = tabulate(match(fams, famnames))
+
+  res = famnames[nMiss == 1]
   
   # Convert to integer if indices
   if(is.integer(fams)) 
@@ -303,9 +330,51 @@ getSimpleFams = function(dvi) {
   res
 }
 
-dviEqual = function(dvi1, dvi2) {
-  identical(dvi1$pm, dvi2$pm) && 
-    identical(dvi1$am, dvi2$am) && 
-    identical(dvi1$missing, dvi2$missing) && 
-    identical(dvi1$pairings, dvi2$pairings)
+nMissFam = function(dvi) {
+  dvi = consolidateDVI(dvi)
+  famnames = names(dvi$am)
+  
+  # AM component of each missing
+  fams = getFamily(dvi, ids = dvi$missing)
+  
+  # Number of missing in each (better than `table`)
+  nMiss = tabulate(match(fams, famnames), nbins = length(famnames))
+  names(nMiss) = famnames
+  
+  nMiss
 }
+
+dviEqual = function(dvi1, dvi2) {
+  test1 = identical(dvi1$pm, dvi2$pm) && 
+    identical(dvi1$am, dvi2$am) && 
+    identical(dvi1$missing, dvi2$missing) &&
+    identical(lengths(dvi1$pairings), lengths(dvi2$pairings))
+  if(!test1)
+    return(FALSE)
+  
+  # Pairings may come in different order
+  
+  for(v in names(dvi1$pairings))
+    if(!setequal(dvi1$pairings[[v]], dvi2$pairings[[v]]))
+      return(FALSE)
+  
+  return(TRUE)
+}
+
+# How many pairings are removed in the reduced dataset?
+# Only count those between vics and missing persons still included
+removedPairings = function(dviRed, dvi) {
+  newvics = names(dviRed$pm)
+  
+  # Previous pairings for the current vics
+  pOld = dvi$pairings[newvics]
+  
+  # Remove pairings to missing individuals no longer included
+  remMiss = .mysetdiff(dvi$missing, dviRed$missing)
+  if(length(remMiss))
+    pOld = lapply(pOld, function(a) .mysetdiff(a, remMiss))
+  
+  sum(lengths(pOld)) - sum(lengths(dviRed$pairings))
+}
+
+

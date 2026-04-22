@@ -18,7 +18,7 @@
 #' @param widths,heights Numeric with relative columns widths / row heights, to
 #'   be passed on to `layout()`.
 #' @param nrowPM The number of rows in the array of PM singletons.
-#' @param nrowAM The number of rows in the array of AM families.
+#' @param nrowAM,ncolAM The number of rows/cols in the array of AM families.
 #' @param dev.height,dev.width Plot height and widths in inches. These are
 #'   optional, and only relevant if `newdev = TRUE`.
 #' @param newdev A logical indicating if a new plot window should be opened.
@@ -31,8 +31,8 @@
 #'
 #' plotDVI(example2)
 #'
-#' # Override default layout of PM singletons
-#' plotDVI(example2, nrowPM = 1)
+#' # Override default layout
+#' plotDVI(example2, nrowPM = 1, ncolAM = 1)
 #'
 #' # Subset
 #' plotDVI(example2, pm = 1:2, am = 1, titles = c("PM (1-2)", "AM (1)"))
@@ -50,7 +50,7 @@
 plotDVI = function(dvi, pm = TRUE, am = TRUE, style = 1, famnames = NA,  
                    hatched = typedMembers, frames = TRUE, titles = c("PM", "AM"),
                    cex = NA, col = 1, lwd = 1, fill = NA, carrier = NULL, 
-                   widths = NULL, heights = NULL, nrowPM = NA, nrowAM = NA, 
+                   widths = NULL, heights = NULL, nrowPM = NA, nrowAM = NA, ncolAM = NA,
                    dev.height = NULL, dev.width = NULL, 
                    newdev = !is.null(c(dev.height, dev.width)), ...) {
   
@@ -87,7 +87,7 @@ plotDVI = function(dvi, pm = TRUE, am = TRUE, style = 1, famnames = NA,
     famnames = nam > 1
   
   # AM layout
-  amDim = amArrayDim(nam, nrowAM)
+  amDim = amArrayDim(nam, nrowAM, ncolAM)
   pmDim = pmArrayDim(npm, nrowPM)
   layoutMat = matrix(1:prod(amDim), nrow = amDim[1], ncol = amDim[2], byrow = TRUE)
   
@@ -169,13 +169,27 @@ plotDVI = function(dvi, pm = TRUE, am = TRUE, style = 1, famnames = NA,
 }
 
 # Default layout of AM families: Up to 5 columns
-amArrayDim = function(N, nrow = NA) {
-  if(is.na(nrow)) {
-    maxcol = if(N <= 9) 4 else if(N <= 15) 5 else if(N<=24) 6 else 7
-    nr = (N-1) %/% maxcol + 1
+amArrayDim = function(N, nrow = NA, ncol = NA) {
+  if(!is.na(nrow) && !is.na(ncol)) {
+    if(nrow * ncol < N)
+      stop2(sprintf("'nrow * ncol' must be >= %d. Provided: %d * %d = %d", 
+                    N, nrow,ncol,nrow*ncol))
+    return(c(nrow, ncol))
   }
-  else 
-    nr = min(N, nrow)
+
+  if(!is.na(ncol)) {
+    if(ncol > N) stop2("`ncolAM` is too large")
+    return(c(ceiling(N/ncol), ncol))
+  }
+  
+  if(!is.na(nrow)) {
+    if(nrow > N) stop2("`nrowAM` is too large")
+    return(c(nrow, ceiling(N/nrow)))
+  }
+  
+  # No input
+  maxcol = if(N <= 9) 4 else if(N <= 15) 5 else if(N<=24) 6 else 7
+  nr = (N-1) %/% maxcol + 1
   c(nr, ceiling(N/nr))
 }
 
@@ -183,8 +197,10 @@ amArrayDim = function(N, nrow = NA) {
 pmArrayDim = function(N, nrow = NA) {
   if(is.na(nrow))
     nr = if(N <= 3) N else ceiling(sqrt(N))
-  else 
+  else {
+    if(nrow > N) stop2("`nrowPM` is too large")
     nr = min(N, nrow)
+  }
   c(nr, ceiling(N/nr))
 }
 
@@ -317,7 +333,7 @@ plotSolution = function(dvi, assignment, k = 1, format = "[S]=[M]", ...) {
   a = assignment
   
   if(is.data.frame(a))
-    a = unlist(a[k, !names(a) %in% c("loglik", "LR", "posterior"), drop = FALSE])
+    a = unlist(a[k, names(dvi$pm), drop = FALSE])
   
   # Vector of matching pairs
   mtch = a[a != "*"]

@@ -80,9 +80,9 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
   
   if(verbose) {
     if(simulate) 
-      print(dvi, printMax = 10)
+      print(dvi)
     else
-      print(dvi[[1]], printMax = 10)
+      print(dvi[[1]])
     cat("\nParameters for DVI comparison:\n")
     cat(" True solution:", toString(true), "\n")
     cat(" Simulate data:", simulate, "\n")
@@ -123,7 +123,7 @@ dviCompare = function(dvi, true, refs = typedMembers(am), methods = 1:6,
                       idsFrom = true[isMatch], idsTo = vics[isMatch], erase = FALSE))
     
     # Remove data from missing
-    AMsims = lapply(AMsims, function(s) setAlleles(s, missing, alleles = 0))
+    AMsims = lapply(AMsims, function(s) removeGenotypes(s, missing))
     
     # Collect into list of dviData objects
     dviSims = lapply(1:Nsim, function(i) dviData(pm = PMsims[[i]], am = AMsims[[i]], missing = missing))

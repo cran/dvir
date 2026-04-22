@@ -25,6 +25,7 @@
 #'   pairings are kept for each victim.
 #' @param numCores An integer; the number of cores used in parallelisation.
 #'   Default: 1.
+#' @param keepLRmatrs A logical; for internal purposes. Default: FALSE.
 #' @param verbose A logical. Default: TRUE.
 #'
 #' @seealso [pairwiseLR()], [findExcluded()]
@@ -56,8 +57,9 @@
 #'
 #' @export
 findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE, 
-                          threshold = 10000, strict = FALSE, relax = !strict, 
-                          limit = 0, nkeep = NULL, numCores = 1, verbose = TRUE) {
+                          threshold = 1e4, strict = FALSE, relax = !strict, 
+                          limit = 0, nkeep = NULL, numCores = 1, 
+                          keepLRmatrs = FALSE, verbose = TRUE) {
   
   if(!missing(relax)) {
     cat("Warning: `relax` is deprecated; replaced by (its negation) `strict`")
@@ -69,8 +71,8 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE,
     cat("Pairwise LR threshold =", threshold, "\n")
   }
 
-  if(!isTRUE(length(threshold) == 1 && threshold >= 0))
-    stop2("`treshold` must be a nonnegative number: ", threshold %||% "NULL")
+  if(!isTRUE(length(threshold) == 1 && threshold > 1))
+    stop2("`threshold` must be a number larger than 1: ", threshold %||% "NULL")
   
   # Ensure proper dviData object
   dvi = consolidateDVI(dvi)
@@ -86,6 +88,9 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE,
   
   # Initialise output
   RES = list()
+  
+  if(keepLRmatrs)
+    LRmatrices = list()
   
   # Loop until problem solved - or no more undisputed matches
   stp = 0
@@ -103,6 +108,8 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE,
     ss = pairwiseLR(dvi, limit = limit, nkeep = nkeep, numCores = numCores, 
                     check = FALSE, verbose = verbose)
     B = ss$LRmatrix
+    if(keepLRmatrs)
+      LRmatrices[[stp]] = B
     
     # Indices of undisputed matches
     undisp = undisputedEntries(B, threshold, strict = strict)
@@ -139,6 +146,11 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE,
     newmissing = setdiff(missing, undispMP)
     dvi = subsetDVI(dvi, pm = newvics, missing = newmissing, verbose = verbose)
     
+    # Victims removed with no remaining pairings
+    for(v in setdiff(newvics, names(dvi$pm)))
+      RES[[v]] = list(Step = stp, Missing = NA, LR = NA)
+    
+      
     # Move vic data to AM data
     names(undispVics) = undispMP
     relevantMP = intersect(undispMP, unlist(labels(dvi$am)))
@@ -153,17 +165,26 @@ findUndisputed = function(dvi, pairings = NULL, ignoreSex = FALSE,
   }
   
   summary = do.call(rbind.data.frame, RES)
+  isExcl = is.na(summary$Missing)
+  step = paste("Step", summary$Step)
+  
   if(nrow(summary)) {
     summary$Sample = names(RES)
     summary$Family = comp[summary$Missing]
-    summary$Conclusion = "Undisputed"
-    summary$Comment = paste("Step", summary$Step)
+    summary$Conclusion = ifelse(isExcl, "Excluded", "Undisputed")
+    summary$Comment = ifelse(isExcl, "No compatible pairings", step)
     summary = summary[c("Family", "Missing", "Sample", "LR", "Conclusion", "Comment")]
     rownames(summary) = NULL
+  }
+  else {
+    summary = NULL
   }
   
   # Update pairings using output from the last pairwiseLR
   dvi$pairings = ss$pairings
   
-  list(dviReduced = dvi, summary = summary, LRmatrix = B)
+  # Keep all or last LR matrix
+  LRmatrix = if(keepLRmatrs) LRmatrices else B
+  
+  list(dviReduced = dvi, summary = summary, LRmatrix = LRmatrix)
 }

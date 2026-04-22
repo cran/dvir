@@ -2,7 +2,7 @@
 % Please edit documentation in R/dviSolve.R
 \name{dviSolve}
 \alias{dviSolve}
-\title{A complete pipeline for solving a DVI case}
+\title{A complete workflow for solving a DVI case}
 \usage{
 dviSolve(
   dvi,
@@ -11,6 +11,7 @@ dviSolve(
   maxIncomp = 2,
   ignoreSex = FALSE,
   limit = 0,
+  detailedOutput = FALSE,
   verbose = TRUE,
   debug = FALSE
 )
@@ -31,17 +32,54 @@ excluded if the number of incompatible markers exceeds this.}
 \item{limit}{A number passed onto \code{\link[=findUndisputed]{findUndisputed()}}; only pairwise LR values
 above this are considered.}
 
+\item{detailedOutput}{A logical, by default FALSE. See Details.}
+
 \item{verbose, debug}{Logicals.}
 }
 \value{
-A data frame.
+A list of data frames \code{AM} and \code{PM}.
+
+If \code{detailedOutput = TRUE}, the result also includes the exclusion matrix
+from the first call to \code{findExcluded()} and the LR matrix from the first
+call to \code{findUndisputed()}.
 }
 \description{
-This wraps several other functions into a complete pipeline for solving a DVI
-case.
+Wraps the main\code{dvir} workflow for DVI analysis and identification of likely AM--PM matches.
+}
+\details{
+The function roughly implements the following workflow:
+\itemize{
+\item \strong{Preparation and QC}
+\itemize{
+\item Consolidate data and validate input: \code{\link[=checkDVI]{checkDVI()}}
+\item Generate pairings: \code{\link[=generatePairings]{generatePairings()}}
+}
+\item \strong{Initial reduction}
+\itemize{
+\item Detect and remove nonidentifiable missing persons: \code{\link[=findNonidentifiable]{findNonidentifiable()}}
+}
+\item \strong{Iterative reduction} (repeat until stable)
+\itemize{
+\item Excluded individuals and pairings: \code{\link[=findExcluded]{findExcluded()}}
+\item Undisputed matches from pairwise LRs: \code{\link[=findUndisputed]{findUndisputed()}}
+}
+\item \strong{AM-driven analysis}: \code{\link[=amDrivenDVI]{amDrivenDVI()}}
+\itemize{
+\item Simple families (1 missing): Summarise conflicting results
+\item Complex families (>1 missing): Joint analysis + GLR
+}
+\item \strong{PM-driven analysis}
+\itemize{
+\item Summarise remaining victim samples.
+}
+\item \strong{Output}
+\itemize{
+\item Format AM and PM summaries: \code{\link[=formatSummary]{formatSummary()}}
+}
+}
 }
 \examples{
 dviSolve(example2)
-dviSolve(example2, threshold = 5, verbose = FALSE)
+dviSolve(example2, threshold = 5, detailedOutput = TRUE, verbose = FALSE)
 
 }

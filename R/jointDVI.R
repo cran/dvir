@@ -1,8 +1,17 @@
-#' Joint DVI search
+#' Joint DVI analysis
 #'
-#' Victims are given as a list of singletons, and references as a list of
-#' pedigrees. All possible assignments are evaluated and solutions ranked
-#' according to the likelihood.
+#' Joint matching of victims and missing persons in a disaster victim identification (DVI)
+#' case, as described by Vigeland & Egeland (2021).
+#'  
+#' NOTE: This is a legacy function. For new projects we recommend these instead:
+#'   * `dviSolve()` (for a complete DVI pipeline)
+#'   * `dviJoint()` (for fully joint analysis)
+#'   
+#' The `jointDVI()` function was the first implementation of a complete DVI analysis in 
+#' `dvir`. It both manages the analysis workflow (including exclusion of impossible
+#' pairings and detection of undisputed matches) and performs the final joint analysis.
+#' As the package evolved, it became beneficial to split these two roles, resulting in
+#' the two functions above.
 #'
 #' @param dvi A `dviData` object, typically created with [dviData()].
 #' @param pairings A list of possible pairings for each victim. If NULL, all
@@ -35,7 +44,7 @@
 #' @param jointRes A data frame produced by `jointDVI()`.
 #' @param LRthresh A positive number, used as upper limit for the LR comparing the
 #'   top result with all others.
-#'
+#' 
 #' @return A data frame. Each row describes an assignment of victims to missing
 #'   persons, accompanied with its log likelihood, the LR compared to the null
 #'   (i.e., no identifications), and the posterior corresponding to a flat
@@ -43,7 +52,11 @@
 #'
 #'   The function `compactJointRes()` removes columns without assignments, and
 #'   solutions whose LR compared with the top result is below `1/LRthresh`. 
-#'   
+#' 
+#' @references 
+#' Vigeland, MD., Egeland, T. Joint DNA-based disaster victim identification. 
+#' Sci Rep 11, 13661 (2021).
+#' 
 #' @seealso [pairwiseLR()], [findUndisputed()]
 #'
 #' @examples
@@ -56,6 +69,12 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
                     limit = 0, nkeep = NULL, undisputed = TRUE, markers = NULL, 
                     threshold = 1e4, strict = FALSE, relax = !strict, disableMutations = NA, 
                     maxAssign = 1e5, numCores = 1, check = TRUE, verbose = TRUE) {
+  
+  message(
+"NOTE: `jointDVI()` is a legacy function. Please consider these instead:
+ * `dviSolve()` (for a complete DVI pipeline)
+ * `dviJoint()` (for fully joint analysis)"
+)
   
   st = Sys.time()
   
@@ -121,7 +140,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     
     # List of undisputed, and their LR's
     undisp = r$summary
-    Nun = nrow(undisp)
+    Nun = nrow(undisp) %||% 0
     
     # If all are undisputed, return early
     # Either all *victims* are matched or all *missing* are identified
@@ -144,7 +163,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     dvi = r$dviReduced
     vics = names(dvi$pm)
     
-    # pairings: These exclude those with LR = 0!
+    # Pairings: These exclude those with LR = 0!
     pairings = r$pairings
     
     if(verbose && Nun > 0)
@@ -186,6 +205,11 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   if(loglik0 == -Inf)
     stop2("Impossible initial data: AM component ", which(logliks.AM == -Inf))
   
+  # Prepare no-ref analysis (to catch related victims)
+  am.noref = removeGenotypes(am)
+  logliks.AM.noref = rep(0, length(am)) |> setNames(names(am))
+  loglik0.noref = sum(logliks.PM)
+  
   # Parallelise
   if(numCores > 1) {
     
@@ -197,19 +221,29 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
     clusterEvalQ(cl, library(dvir))
     clusterExport(cl, "loglikAssign", envir = environment())
 
-    # Loop through assignments
+    # Main likelihood calculation: Loop through assignments
     loglik = parLapply(cl, assignmentList, function(a) 
       loglikAssign(pm, am, vics, a, loglik0, logliks.PM, logliks.AM))
+	
+  	# Same with empty AM
+  	loglik.noref = parLapply(cl, assignmentList, function(a) 
+        loglikAssign(pm, am.noref, vics, a, loglik0.noref, logliks.PM, logliks.AM.noref))
   }
   else {
     # Setup progress bar
     if(progbar <- verbose && interactive())
       pb = txtProgressBar(min = 0, max = nAss, style = 3)
-    
+
+    # Main likelihood calculation: Loop through assignments    
     loglik = lapply(seq_len(nAss), function(i) {
       if(progbar) setTxtProgressBar(pb, i)
       loglikAssign(pm, am, vics, assignmentList[[i]], loglik0, logliks.PM, logliks.AM)
     })
+	
+  	# Same with empty AM
+  	loglik.noref = lapply(seq_len(nAss), function(i) {
+        loglikAssign(pm, am.noref, vics, assignmentList[[i]], loglik0.noref, logliks.PM, logliks.AM.noref)
+  	})
     
     # Close progress bar
     if(progbar) close(pb)
@@ -220,8 +254,10 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   LR = exp(loglik - loglik0)
   posterior = LR/sum(LR) # assumes a flat prior
   
+  LR0 = exp(unlist(loglik.noref) - loglik0.noref)
+  
   # Add undisputed matches
-  Nun = nrow(undisp)
+  Nun = nrow(undisp) %||% 0
   if(Nun > 0) {
     # Add ID columns
     assignments[, undisp$Sample] = rep(undisp$Missing, each = nAss)
@@ -239,7 +275,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
   }
     
   # Collect results
-  tab = cbind(assignments, loglik = loglik, LR = LR, posterior = posterior)
+  tab = cbind(assignments, loglik = loglik, LR = LR, posterior = posterior, LR0 = LR0)
   
   # Sort in decreasing likelihood, break ties with grid
   g = assignments
@@ -259,7 +295,7 @@ jointDVI = function(dvi, pairings = NULL, ignoreSex = FALSE, assignments = NULL,
 #' @export
 compactJointRes = function(jointRes, LRthresh = NULL) {
   if(!is.null(LRthresh)) {
-    # Require LR > threshold
+    # Require LR >= threshold
     keepRows = jointRes$LR >= LRthresh
     
     # Also require LR_1:a > threshold (i.e. with top result as numerator)
