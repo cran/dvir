@@ -1,7 +1,7 @@
 Type: Package
 Package: dvir
 Title: Disaster Victim Identification
-Version: 3.4.0
+Version: 3.4.1
 Authors@R: c(
     person("Magnus Dehli", "Vigeland", , "m.d.vigeland@medisin.uio.no", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-9134-4962")),
@@ -25,12 +25,12 @@ Suggests: knitr, rmarkdown
 Encoding: UTF-8
 Language: en-GB
 LazyData: true
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.0.0
 NeedsCompilation: no
-Packaged: 2026-04-22 12:18:29 UTC; magnu
+Packaged: 2026-05-15 16:18:55 UTC; magnu
 Author: Magnus Dehli Vigeland [aut, cre] (ORCID:
     <https://orcid.org/0000-0002-9134-4962>),
   Thore Egeland [aut] (ORCID: <https://orcid.org/0000-0002-3465-8885>)
 Maintainer: Magnus Dehli Vigeland <m.d.vigeland@medisin.uio.no>
 Repository: CRAN
-Date/Publication: 2026-04-22 12:50:02 UTC
+Date/Publication: 2026-05-15 21:40:17 UTC
